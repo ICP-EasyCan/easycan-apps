@@ -1,0 +1,11 @@
+# Pin della toolchain Rust per build riproducibili del WASM (segnale di fiducia §A).
+#
+# Lo SHA-256 del WASM (= module_hash certificato dall'IC) è stabile solo a parità
+# di versione rustc. Questo file lo pinna: chiunque rifà la build con la stessa
+# toolchain + binaryen 129 + RUSTFLAGS remap (vedi Dockerfile) ottiene lo stesso hash.
+#
+# NB: onorato solo dai proxy rustup. Su un sistema senza rustup (es. Arch con rust
+# di sistema) è un no-op innocuo; dentro il Dockerfile (immagine ufficiale rust) vale.
+[toolchain]
+channel = "1.95.0"
+targets = ["wasm32-unknown-unknown"]

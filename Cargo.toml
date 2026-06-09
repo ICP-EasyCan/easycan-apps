@@ -1,0 +1,72 @@
+[workspace]
+resolver = "2"
+members = [
+    # ── CORE BLOCKS ──────────────────────────────────────────────────
+    "core/core-types",
+    "core/core-auth",
+    "core/core-storage",
+    "core/core-timer",
+    "core/core-assets",
+    "core/cap-presence",
+    "core/cap-messaging",
+    "core/cap-signaling",
+    "core/cap-notify",
+    "core/cap-archive",
+    "core/cap-crud",
+    "core/cap-crypto",
+    "core/cap-platform",
+
+
+
+
+    # ── APPS ─────────────────────────────────────────────────────────
+    "apps/messenger/canister",
+    "apps/vault/canister",
+
+]
+
+[workspace.dependencies]
+# ICP SDK — versioni fisse, non cambiare senza testare tutto il workspace
+ic-cdk                = "0.19"
+ic-cdk-timers         = "1.0"
+ic-stable-structures  = "0.7"
+candid                = "0.10"
+ic-certification      = "3"
+ic-http-certification = "3"
+icrc-ledger-types     = "0.1"
+
+# Serialization
+serde         = { version = "1", features = ["derive"] }
+serde_bytes   = "0.11"
+serde_cbor    = "0.11"
+serde_json    = "1"
+
+# Crypto
+sha2   = "0.10"
+hex    = "0.4"
+base64 = "0.22"
+blake3 = { version = "1", default-features = false }
+
+# Testing
+pocket-ic = "12"
+
+# ── Internal: core blocks ──────────────────────────────────────────
+core-types    = { path = "core/core-types" }
+core-auth     = { path = "core/core-auth" }
+core-storage  = { path = "core/core-storage" }
+core-timer    = { path = "core/core-timer" }
+core-assets   = { path = "core/core-assets" }
+cap-presence  = { path = "core/cap-presence" }
+cap-messaging = { path = "core/cap-messaging" }
+cap-signaling = { path = "core/cap-signaling" }
+cap-notify    = { path = "core/cap-notify" }
+cap-archive   = { path = "core/cap-archive" }
+cap-crud      = { path = "core/cap-crud" }
+cap-crypto    = { path = "core/cap-crypto" }
+cap-platform  = { path = "core/cap-platform" }
+
+
+[profile.release]
+opt-level     = 3
+lto           = true
+codegen-units = 1

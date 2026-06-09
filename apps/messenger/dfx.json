@@ -1,0 +1,28 @@
+{
+  "canisters": {
+    "messenger": {
+      "type": "custom",
+      "candid": "canister/messenger_canister.did",
+      "wasm": "../../target/wasm32-unknown-unknown/release/messenger_canister.wasm",
+      "build": [],
+      "metadata": [
+        { "name": "candid:service", "path": "canister/messenger_canister.did" }
+      ]
+    },
+    "messenger_bob": {
+      "type": "custom",
+      "candid": "canister/messenger_canister.did",
+      "wasm": "../../target/wasm32-unknown-unknown/release/messenger_canister.wasm",
+      "build": [],
+      "metadata": [
+        { "name": "candid:service", "path": "canister/messenger_canister.did" }
+      ]
+    },
+    "internet_identity": {
+      "type": "pull",
+      "id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+    }
+  },
+  "defaults": { "build": { "packtool": "" } },
+  "version": 1
+}

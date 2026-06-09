@@ -1,0 +1,37 @@
+[package]
+name = "messenger-canister"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+platform = ["cap-platform"]
+
+[dependencies]
+# Core
+core-types.workspace = true
+core-storage.workspace = true
+core-auth.workspace = true
+core-timer.workspace = true
+core-assets.workspace = true
+
+# Platform bridge (opzionale — attivato con --features platform)
+cap-platform = { workspace = true, optional = true }
+
+# Capability
+cap-presence.workspace = true
+cap-messaging.workspace = true
+cap-signaling.workspace = true
+cap-notify.workspace = true
+cap-archive.workspace = true
+cap-crypto.workspace = true
+
+# IC SDK
+candid.workspace = true
+ic-cdk.workspace = true
+ic-cdk-timers.workspace = true
+ic-stable-structures.workspace = true
+serde.workspace = true

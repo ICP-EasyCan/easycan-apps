@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Vault — Vetrina restyle (anteprima)</title>
+  <!-- Stesso CSS reale dell'app (tira dentro theme.css + base.css). -->
+  <link rel="stylesheet" href="/src/styles/vault.css" />
+  <!-- Stile della SOLA vetrina (prefisso pv-): non è dell'app, serve a impaginare
+       i campioni e a forzare la visibilità di elementi mobile-only. -->
+  <style>
+    html, body { height: auto; overflow: auto; }
+    .pv-wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 6rem; }
+    .pv-top { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+      padding: 0.75rem 0 1.25rem; border-bottom: 1px solid var(--border-default); margin-bottom: 1.5rem; }
+    .pv-top h1 { font-size: 1.5rem; }
+    .pv-top .pv-note { color: var(--text-muted); font-size: 0.85rem; }
+    .pv-sec { margin: 2.5rem 0; }
+    .pv-sec > h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-muted); margin-bottom: 0.9rem; border-left: 2px solid var(--accent);
+      padding-left: 0.6rem; }
+    .pv-row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    .pv-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    .pv-sw { border-radius: var(--radius-md); border: 1px solid var(--border-default);
+      padding: 0.6rem; font-size: 0.72rem; font-family: var(--font-mono); height: 74px;
+      display: flex; flex-direction: column; justify-content: flex-end; }
+    .pv-device { width: 390px; max-width: 100%; height: 300px; border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column;
+      background: var(--surface-0); position: relative; }
+    .pv-device .vault-content { flex: 1; }
+    /* Vault bottom-nav è mobile-only (display:none fino a 768px): la forzo visibile
+       qui dentro al device per poterla vedere su desktop. SOLO anteprima. */
+    .pv-device .bottom-nav { display: flex; }
+  </style>
+</head>
+<body>
+  <div class="pv-wrap">
+    <div class="pv-top">
+      <h1>Sovereign <span style="color:var(--accent)">Vault</span></h1>
+      <span class="pv-note">vetrina statica — hot-reload sul CSS · ridimensiona la finestra per il mobile</span>
+    </div>
+
+    <!-- TOKENS / PALETTE -->
+    <section class="pv-sec">
+      <h2>Palette (token themable — F3 ridipinge da qui)</h2>
+      <div class="pv-grid">
+        <div class="pv-sw" style="background:var(--surface-0)">surface-0</div>
+        <div class="pv-sw" style="background:var(--surface-1)">surface-1</div>
+        <div class="pv-sw" style="background:var(--surface-2)">surface-2</div>
+        <div class="pv-sw" style="background:var(--surface-3)">surface-3</div>
+        <div class="pv-sw" style="background:var(--accent);color:var(--accent-contrast)">accent</div>
+        <div class="pv-sw" style="background:var(--accent-soft)">accent-soft</div>
+        <div class="pv-sw" style="background:var(--success);color:#08210f">success</div>
+        <div class="pv-sw" style="background:var(--warn);color:#241701">warn</div>
+        <div class="pv-sw" style="background:var(--danger);color:#2a0606">danger</div>
+        <div class="pv-sw" style="background:var(--accent2);color:#04201c">accent2 (legacy)</div>
+      </div>
+    </section>
+
+    <!-- TYPOGRAPHY -->
+    <section class="pv-sec">
+      <h2>Tipografia</h2>
+      <h1 class="dashboard-title">Dashboard title (2.15rem / 700)</h1>
+      <p class="dashboard-subtitle">Subtitle secondario, peso normale</p>
+      <p style="margin-top:.6rem">Corpo del testo standard a 15px, line-height 1.5.</p>
+      <p class="hint">.hint — testo di aiuto attenuato</p>
+      <p class="mono small">.mono.small — principal-ish a2b3c-def45-...-cai</p>
+    </section>
+
+    <!-- BUTTONS -->
+    <section class="pv-sec">
+      <h2>Bottoni</h2>
+      <div class="pv-row">
+        <button class="btn-primary">Primary</button>
+        <button class="btn-secondary">Secondary</button>
+        <button class="btn-success">Success</button>
+        <button class="btn-danger">Danger</button>
+        <button class="btn-text">Text</button>
+        <button class="btn-primary" disabled>Disabled</button>
+        <button class="btn-icon">⚙️</button>
+        <button class="btn-secondary small">Small</button>
+      </div>
+    </section>
+
+    <!-- INPUTS -->
+    <section class="pv-sec">
+      <h2>Form</h2>
+      <div style="max-width:420px">
+        <input class="form-input" placeholder="Input normale" />
+        <div class="input-with-action">
+          <input class="form-input" value="con azione affiancata" />
+          <button class="btn-secondary small">Copia</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CARDS -->
+    <section class="pv-sec">
+      <h2>Card &amp; superfici</h2>
+      <div class="pv-row" style="align-items:stretch">
+        <div class="card" style="max-width:320px;flex:1">
+          <h3 style="margin-bottom:.4rem">.card</h3>
+          <p class="hint" style="margin:0">Superficie base con bordo e radius.</p>
+        </div>
+        <div class="glass-panel" style="max-width:320px;flex:1;padding:1rem">
+          <h3 style="margin-bottom:.4rem">.glass-panel</h3>
+          <p class="hint" style="margin:0">Glassmorphism (blur + surface-glass).</p>
+        </div>
+      </div>
+    </section>
+
+    <!-- DASHBOARD CARDS (vault-specific) -->
+    <section class="pv-sec">
+      <h2>Dashboard cards</h2>
+      <div class="dashboard-cards">
+        <div class="dashboard-card">
+          <div class="dashboard-card-header">
+            <div class="dashboard-card-icon">🔑</div>
+            <div class="dashboard-card-info">
+              <h3>Passwords</h3>
+              <div class="dashboard-card-count">12 elementi</div>
+            </div>
+          </div>
+          <div class="dashboard-card-action"><button class="btn-secondary small">Apri →</button></div>
+        </div>
+        <div class="dashboard-card">
+          <div class="dashboard-card-header">
+            <div class="dashboard-card-icon">📝</div>
+            <div class="dashboard-card-info">
+              <h3>Notes</h3>
+              <div class="dashboard-card-count">5 elementi</div>
+            </div>
+          </div>
+          <div class="dashboard-card-action"><button class="btn-secondary small">Apri →</button></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- VAULT LIST + EMPTY -->
+    <section class="pv-sec">
+      <h2>Lista elementi &amp; empty state</h2>
+      <div class="vault-list">
+        <div class="vault-item">
+          <div class="vault-item-main">
+            <div class="vault-item-title">GitHub</div>
+            <div class="vault-item-sub">andrea@example.com</div>
+          </div>
+          <span class="vault-item-arrow">›</span>
+        </div>
+        <div class="vault-item">
+          <div class="vault-item-main">
+            <div class="vault-item-title">Banca</div>
+            <div class="vault-item-sub">login personale</div>
+          </div>
+          <span class="vault-item-arrow">›</span>
+        </div>
+      </div>
+      <div class="empty-state" style="margin-top:1rem">
+        <div class="empty-icon">🗄️</div>
+        <p>Nessun elemento ancora. Aggiungi il primo.</p>
+      </div>
+    </section>
+
+    <!-- SETTINGS -->
+    <section class="pv-sec">
+      <h2>Settings</h2>
+      <div class="card" style="padding:0;max-width:560px">
+        <div class="settings-section">
+          <h3>Account</h3>
+          <div class="settings-row">
+            <span class="settings-label">Principal</span>
+            <span class="settings-value mono">a2b3c-def45-ghij6-klmno-cai</span>
+          </div>
+          <div class="settings-row">
+            <span class="settings-label">Canister</span>
+            <span class="settings-value mono">rrkah-fqaaa-aaaaa-aaaaq-cai</span>
+          </div>
+        </div>
+        <div class="settings-section">
+          <h3>Platform</h3>
+          <div class="settings-notice">
+            <div class="settings-notice-title">Support EasyCan attivo</div>
+            <span class="hint">EasyCan può assisterti su questo canister finché il support è attivo.</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SOVEREIGNTY CONTROLLERS -->
+    <section class="pv-sec">
+      <h2>Sovereignty — controllers</h2>
+      <div class="card" style="max-width:620px">
+        <ul class="controllers-list">
+          <li class="ctrl-row">
+            <div class="ctrl-info">
+              <code class="ctrl-principal">2vxsx-fae-...-controller-principal</code>
+              <span class="ctrl-label-tag">tu (proprietario)</span>
+            </div>
+            <div class="ctrl-actions"><button class="btn-text small">rimuovi</button></div>
+          </li>
+          <li class="ctrl-row ctrl-row--off">
+            <div class="ctrl-info">
+              <code class="ctrl-principal">aaaaa-bbbbb-...-easycan</code>
+              <span class="ctrl-label-tag">EasyCan (rimosso)</span>
+            </div>
+          </li>
+        </ul>
+        <div class="ctrl-add-row" style="margin-top:.75rem">
+          <div class="ctrl-add-inputs">
+            <input class="ctrl-add-input" placeholder="principal del nuovo controller" />
+            <button class="btn-primary small">Aggiungi</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MODAL (inline) -->
+    <section class="pv-sec">
+      <h2>Modale</h2>
+      <div class="sov-modal-dialog" style="position:relative">
+        <div class="sov-modal-header"><h3>Conferma</h3><button class="btn-icon">✕</button></div>
+        <div class="sov-modal-body"><p>Corpo della modale con il messaggio.</p></div>
+        <div class="sov-modal-footer">
+          <button class="btn-secondary">Annulla</button>
+          <button class="btn-primary">Conferma</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- APP SHELL + BOTTOM NAV (device frame) -->
+    <section class="pv-sec">
+      <h2>App shell + bottom-nav (mobile)</h2>
+      <div class="pv-device">
+        <header class="app-header" style="position:relative">
+          <a class="app-brand">Sovereign <span class="app-brand-accent">Vault</span></a>
+          <div class="app-header-spacer"></div>
+          <div class="app-actions"><span class="mono small" style="color:var(--text-muted)">a2b3c-…-cai</span></div>
+        </header>
+        <div class="vault-content">
+          <div class="vault-item"><div class="vault-item-main"><div class="vault-item-title">Esempio</div><div class="vault-item-sub">contenuto scrollabile</div></div><span class="vault-item-arrow">›</span></div>
+        </div>
+        <nav class="bottom-nav">
+          <button class="bottom-nav-tab active"><span class="bottom-nav-icon">🏠</span><span class="bottom-nav-label">Dashboard</span></button>
+          <button class="bottom-nav-tab"><span class="bottom-nav-icon">🔑</span><span class="bottom-nav-label">Passwords</span></button>
+          <button class="bottom-nav-tab"><span class="bottom-nav-icon">📝</span><span class="bottom-nav-label">Notes</span></button>
+          <button class="bottom-nav-tab"><span class="bottom-nav-icon">⚙️</span><span class="bottom-nav-label">Settings</span></button>
+        </nav>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

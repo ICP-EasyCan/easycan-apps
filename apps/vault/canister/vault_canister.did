@@ -1,0 +1,66 @@
+// Input dal frontend — senza id e timestamp (assegnati dal backend).
+type CreateInput = record { data : blob; namespace : text };
+type CrudRecord = record {
+  id : nat64;
+  updated_at : nat64;
+  data : blob;
+  created_at : nat64;
+  namespace : text;
+};
+// Contesto di derivazione — determina l'input per VetKeys.
+type DerivationContext = variant {
+  // Chiave condivisa per conversazione con un peer.
+  // Ordine canonico: min(owner, peer) + max(owner, peer) → stessa chiave per entrambi.
+  PeerConversation : record { peer : principal };
+  // Chiave per dato archiviato (equivalente al file_id del vault).
+  StoredData : record { data_id : text };
+  // Contesto libero per capability future.
+  Custom : record { context : blob };
+};
+type HttpRequest = record {
+  url : text;
+  method : text;
+  body : blob;
+  headers : vec record { text; text };
+};
+type HttpResponse = record {
+  body : blob;
+  headers : vec record { text; text };
+  upgrade : opt bool;
+  status_code : nat16;
+};
+// Risultato paginato di list_records.
+type ListResult = record { total : nat64; records : vec CrudRecord };
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : CrudRecord; Err : text };
+type Result_2 = variant { Ok : text; Err : text };
+// Input per update — sovrascrive data, aggiorna updated_at.
+type UpdateInput = record { data : blob };
+service : (principal) -> {
+  add_to_whitelist : (principal) -> (Result);
+  allow_claim : () -> (Result);
+  // Versione semver bakeata a build dal `Cargo.toml` dell'app (unica fonte di verità,
+  // condivisa col `manifest.version` della release). Il `module_hash` resta la prova crittografica.
+  app_version : () -> (text) query;
+  claim_user_principal : () -> (Result);
+  // Svuota tutti gli asset prima di ricaricare un bundle nuovo (self-upgrade §B): evita file
+  // orfani col bundle Vite (hash di contenuto diversi). Va seguito da upload_asset_batch + finalize.
+  clear_assets : () -> (Result);
+  count_records : (text) -> (nat64) query;
+  create_record : (CreateInput) -> (Result_1);
+  delete_record : (nat64) -> (Result);
+  derive_encrypted_key : (text, DerivationContext, blob) -> (Result_2);
+  finalize_assets : () -> (Result);
+  get_owner : () -> (principal) query;
+  get_record : (nat64) -> (opt CrudRecord) query;
+  get_user_principal : () -> (opt principal) query;
+  get_verification_key : (text) -> (Result_2);
+  http_request : (HttpRequest) -> (HttpResponse) query;
+  http_request_update : (HttpRequest) -> (HttpResponse);
+  is_whitelisted : (principal) -> (bool) query;
+  list_records : (text, nat64, nat64) -> (ListResult) query;
+  remove_from_whitelist : (principal) -> (Result);
+  update_record : (nat64, UpdateInput) -> (Result_1);
+  upload_asset : (text, text, blob) -> (Result);
+  upload_asset_batch : (vec record { text; text; blob }) -> (Result);
+}

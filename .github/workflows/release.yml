@@ -1,0 +1,197 @@
+name: release
+
+# Self-upgrade §B — Fase 0. A ogni tag `vault-v*` / `messenger-v*` questa Action:
+#   1. verifica che il tag combaci con la versione in Cargo.toml (unica fonte di verità);
+#   2. builda il WASM con LO STESSO Dockerfile che un auditor usa per #verify → l'hash
+#      pubblicato è riproducibile cross-machine per costruzione (segnale di fiducia §A);
+#   3. builda il bundle frontend per mainnet (DFX_NETWORK=ic);
+#   4. genera manifest.json (contratto del self-upgrade);
+#   5. pubblica una release IMMUTABILE <app>-vX.Y.Z (ancora d'audit, binari + manifest) +
+#      ri-sposta un rolling tag PRE-RELEASE <app>-latest (manifest only, per il tooling lato
+#      server come deploy-factory.sh);
+#   6. force-pusha il branch `dist` (orphan single-commit, solo-latest) coi binari + manifest
+#      a un path versionato → è il TRANSPORT CORS del self-upgrade dal browser: l'app fa
+#      fetch di https://raw.githubusercontent.com/<repo>/dist/<app>/manifest.json. I
+#      release-asset GitHub NON hanno header CORS (fetch() browser bloccato); i file
+#      COMMITTATI serviti da raw hanno `Access-Control-Allow-Origin: *`. Cfr. BACKLOG §7.
+#
+# Il monorepo è l'unica ancora di fiducia: sorgente + Dockerfile + release + source_commit
+# vivono nello stesso clone (cfr. memory/progetti/attivi/self_upgrade_piano.md, dec. 9-12).
+
+on:
+  push:
+    tags:
+      - 'vault-v*'
+      - 'messenger-v*'
+
+permissions:
+  contents: write   # creare release + spostare tag
+
+env:
+  # Paracadute min_compatible_version. Le migrazioni sono additive forward-only, quindi
+  # qualsiasi vecchia versione può saltare all'ultima; alzare SOLO su un vero break.
+  MIN_COMPATIBLE: "0.1.0"
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout (full history per source_commit)
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Parse tag → app / version
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          APP="${TAG%%-v*}"                 # vault-v0.3.0 → vault
+          VERSION="${TAG#${APP}-v}"         # vault-v0.3.0 → 0.3.0
+          case "$APP" in
+            vault|messenger) ;;
+            *) echo "::error::tag '$TAG' non riconosciuto (atteso vault-v* | messenger-v*)"; exit 1 ;;
+          esac
+          PACKAGE="${APP}-canister"
+          WASM_NAME="${PACKAGE//-/_}"       # vault-canister → vault_canister
+          {
+            echo "tag=$TAG"
+            echo "app=$APP"
+            echo "version=$VERSION"
+            echo "package=$PACKAGE"
+            echo "wasm_name=$WASM_NAME"
+            echo "rolling=${APP}-latest"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Tag guard — tag == Cargo.toml version
+        run: |
+          set -euo pipefail
+          CARGO_VER="$(grep -m1 '^version' apps/${{ steps.meta.outputs.app }}/canister/Cargo.toml \
+                        | sed -E 's/.*"([^"]+)".*/\1/')"
+          if [ "$CARGO_VER" != "${{ steps.meta.outputs.version }}" ]; then
+            echo "::error::tag ${{ steps.meta.outputs.version }} ≠ Cargo.toml $CARGO_VER — bumpa Cargo.toml o correggi il tag"
+            exit 1
+          fi
+          echo "OK: versione coerente ($CARGO_VER)"
+
+      - name: Build WASM via Dockerfile (riproducibile, = ciò che #verify ricostruisce)
+        run: |
+          set -euo pipefail
+          docker build --build-arg PACKAGE=${{ steps.meta.outputs.package }} -t easycan-verify .
+          cid="$(docker create easycan-verify)"
+          docker cp "$cid:/out/app.wasm" "./${{ steps.meta.outputs.wasm_name }}.wasm"
+          docker rm "$cid"
+          echo "module_hash (SHA-256, post wasm-opt):"
+          sha256sum "./${{ steps.meta.outputs.wasm_name }}.wasm"
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Build frontend bundle (mainnet)
+        run: |
+          set -euo pipefail
+          npm ci --prefix shared
+          npm ci --prefix apps/${{ steps.meta.outputs.app }}/frontend
+          DFX_NETWORK=ic npm run build --prefix apps/${{ steps.meta.outputs.app }}/frontend
+          tar -czf frontend.tar.gz -C apps/${{ steps.meta.outputs.app }}/frontend/dist .
+          echo "frontend bundle:"; sha256sum frontend.tar.gz
+
+      - name: Generate manifest.json
+        run: |
+          set -euo pipefail
+          scripts/make-manifest.sh \
+            --app "${{ steps.meta.outputs.app }}" \
+            --version "${{ steps.meta.outputs.version }}" \
+            --min-compatible "${MIN_COMPATIBLE}" \
+            --wasm "./${{ steps.meta.outputs.wasm_name }}.wasm" \
+            --frontend "./frontend.tar.gz" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --tag "${{ steps.meta.outputs.tag }}" \
+            --dist-branch dist \
+            --commit "${GITHUB_SHA}" \
+            --notes "Release ${{ steps.meta.outputs.tag }}. Verify: docs/build/REPRODUCIBLE_BUILD.md" \
+            > manifest.json
+          echo "── manifest.json ──"; cat manifest.json
+
+      - name: Publish to dist branch (transport CORS — raw.githubusercontent, solo-latest)
+        run: |
+          set -euo pipefail
+          APP="${{ steps.meta.outputs.app }}"
+          VERSION="${{ steps.meta.outputs.version }}"
+          WASM="./${{ steps.meta.outputs.wasm_name }}.wasm"
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage = contenuto attuale di dist (carry-over dell'ALTRA app) meno questa app,
+          # più i nuovi artefatti versionati. `dist` resta single-commit (orphan, force-push):
+          # solo l'ultima versione di ogni app → .git costante, niente crescita storica.
+          STAGE="$(mktemp -d)"
+          git fetch origin "+refs/heads/dist:refs/remotes/origin/dist" 2>/dev/null || true
+          if git rev-parse --verify origin/dist >/dev/null 2>&1; then
+            git archive origin/dist | tar -x -C "$STAGE"
+          fi
+          rm -rf "$STAGE/$APP"
+          mkdir -p "$STAGE/$APP/$VERSION"
+          cp manifest.json   "$STAGE/$APP/manifest.json"
+          cp "$WASM"         "$STAGE/$APP/$VERSION/$(basename "$WASM")"
+          cp frontend.tar.gz "$STAGE/$APP/$VERSION/frontend.tar.gz"
+
+          # Commit-tree senza parent = orphan; force-push a dist.
+          export GIT_INDEX_FILE="$RUNNER_TEMP/dist.index"; rm -f "$GIT_INDEX_FILE"
+          while IFS= read -r -d '' f; do
+            rel="${f#"$STAGE"/}"
+            blob="$(git hash-object -w "$f")"
+            git update-index --add --cacheinfo "100644,$blob,$rel"
+          done < <(find "$STAGE" -type f -print0)
+          TREE="$(git write-tree)"
+          COMMIT="$(git commit-tree "$TREE" -m "dist: $APP v$VERSION (transport CORS, solo-latest)")"
+          git push -f origin "$COMMIT:refs/heads/dist"
+          unset GIT_INDEX_FILE
+          echo "dist aggiornato: $APP/$VERSION → raw.githubusercontent.com/${GITHUB_REPOSITORY}/dist/$APP/manifest.json"
+
+      - name: Publish immutable release (audit anchor — binari + manifest)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          WASM="./${{ steps.meta.outputs.wasm_name }}.wasm"
+          SHA="$(sha256sum "$WASM" | cut -d' ' -f1)"
+          BODY=$(cat <<EOF
+          Reproducible build — ${{ steps.meta.outputs.tag }}
+
+          - app: ${{ steps.meta.outputs.app }}  ·  version: ${{ steps.meta.outputs.version }}
+          - source commit: ${GITHUB_SHA}
+          - module_hash (SHA-256, post wasm-opt -Oz --strip-debug): ${SHA}
+          - Verify: docker build --build-arg PACKAGE=${{ steps.meta.outputs.package }} -t easycan-verify .
+                    docker run --rm easycan-verify sha256sum /out/app.wasm
+          - Recipe: ./Dockerfile @ ${GITHUB_SHA}  ·  docs/build/REPRODUCIBLE_BUILD.md
+          EOF
+          )
+          # Idempotente: se la release del tag esiste già la sovrascrive (--clobber sugli asset).
+          if gh release view "${{ steps.meta.outputs.tag }}" >/dev/null 2>&1; then
+            gh release upload "${{ steps.meta.outputs.tag }}" "$WASM" frontend.tar.gz manifest.json --clobber
+          else
+            gh release create "${{ steps.meta.outputs.tag }}" \
+              --title "${{ steps.meta.outputs.tag }}" \
+              --notes "$BODY" \
+              "$WASM" frontend.tar.gz manifest.json
+          fi
+
+      - name: Move rolling pointer (<app>-latest, pre-release — solo manifest, tooling server-side)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          ROLLING="${{ steps.meta.outputs.rolling }}"
+          # Puntatore mobile per il tooling LATO SERVER (deploy-factory.sh default). Il browser
+          # NON lo usa più (transport = branch dist via raw, CORS). Il manifest qui è identico a
+          # quello su dist; i suoi *_url puntano comunque a raw/dist (validi finché è l'ultima).
+          gh release delete "$ROLLING" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$ROLLING" \
+            --title "$ROLLING (rolling pointer)" \
+            --notes "Puntatore mobile all'ultima release di ${{ steps.meta.outputs.app }} per il tooling. Non è un'ancora d'audit: usa ${{ steps.meta.outputs.tag }}. Browser → branch dist via raw.githubusercontent." \
+            --prerelease \
+            --target "${GITHUB_SHA}" \
+            manifest.json

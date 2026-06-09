@@ -1,0 +1,15 @@
+{
+  "name": "@icp-sovereign/shared",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Capability JS condivise tra apps e portale. Importato via alias @shared in Vite.",
+  "scripts": {
+    "test": "node --test src/core/"
+  },
+  "dependencies": {
+    "@dfinity/agent": "^3.4.3",
+    "@dfinity/principal": "^3.4.3",
+    "@dfinity/vetkeys": "^0.3.0"
+  }
+}

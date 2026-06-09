@@ -1,0 +1,257 @@
+/**
+ * theme.css — Sovereign Ecosystem Design System (Gold Standard)
+ * 
+ * Centralized variables, glassmorphism utilities, and the App Shell layout
+ * for all Sovereign apps. This replaces individual tokens.css files.
+ */
+
+/* ── Typography (Inter, self-hosted woff2 — restyle 2026 F2) ─────────────────
+   woff2 latin subset condivisi col portale (Inter 400/600/700), serviti da
+   /fonts/ — ogni app li vendora in frontend/public/fonts/. NO Google Fonts
+   (dipendenza esterna + viola la CSP del canister). font-display: swap. */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url('/fonts/inter-400.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url('/fonts/inter-600.woff2') format('woff2');
+}
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url('/fonts/inter-700.woff2') format('woff2');
+}
+
+/* ── Global Tokens — FONTE UNICA (restyle 2026 F1) ───────────────────────────
+   Questo :root è l'UNICO posto che definisce i token delle app (vault+messenger).
+   I tokens.css per-app e il :root legacy di base.css sono stati rimossi in F1.
+
+   Due gruppi:
+   · THEMABLE  → surfaces / text / borders / accent / semantic. La palette vive
+     qui: F3 ridipinge SOLO questo gruppo (oggi = viola originale, invariato).
+   · STRUCTURAL → radii / shadows / motion / font. Condivisi, non si tematizzano.
+
+   In coda, alias di retro-compatibilità per i nomi legacy (--bg/--surface/...)
+   consumati dai selettori di base.css e dagli inline style: valori ESPLICITI
+   pari a quelli che base.css renderizzava prima di F1 (aspetto identico). */
+:root {
+  /* ===== THEMABLE (palette "Cool Slate" — restyle 2026 F3) =====
+     Allineata al portale (coerenza EasyCan end-to-end). L'ACCENTO è il default
+     condiviso (teal); ogni app lo ridichiara per la propria identità nel suo
+     entry CSS (vault.css = teal sobrio, messenger.css = warm). */
+  /* Surfaces (dark) — sottotono blu-inchiostro */
+  --surface-0: #0a0c12;
+  --surface-1: #11141c;
+  --surface-2: #181c26;
+  --surface-3: #212634;
+  --surface-glass: rgba(17, 20, 28, 0.72);
+
+  /* Text */
+  --text-primary: #eef1f6;
+  --text-secondary: #a6acbb;
+  --text-muted: #6c7385;
+
+  /* Borders — tinta slate fredda */
+  --border-subtle: rgba(160, 180, 220, 0.09);
+  --border-default: rgba(160, 180, 220, 0.14);
+  --border-strong: rgba(160, 180, 220, 0.20);
+
+  /* Accent (default condiviso = teal; le app lo sovrascrivono localmente) */
+  --accent: #1fded3;
+  --accent-hover: #4ceae0;
+  --accent-soft: rgba(31, 222, 211, 0.15);
+  --accent-ring: rgba(31, 222, 211, 0.34);
+  --accent-contrast: #00201f;
+
+  /* Secondary accent — ambra, usato con parsimonia (highlight, hero gradient) */
+  --accent-2: #f7b13d;
+  --accent-2-soft: rgba(247, 177, 61, 0.14);
+
+  /* Semantic */
+  --success: #42d98a;
+  --warn: #f7b13d;
+  --danger: #f5716f;
+
+  /* ===== STRUCTURAL (condivisi, non tematizzare) ===== */
+  /* Radii — più morbidi (allineati al portale) */
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 22px;
+  --radius-pill: 999px;
+
+  /* Shadows */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.35);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.45);
+  /* Glow — dipende dall'accent, quindi le app lo ridichiarano col loro hue */
+  --shadow-glow: 0 0 0 1px var(--accent-ring), 0 8px 32px rgba(31, 222, 211, 0.12);
+
+  /* Motion */
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 120ms;
+  --dur: 200ms;
+
+  /* Font Aliases */
+  --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'Fira Code', monospace;
+
+  /* ===== LEGACY-COMPAT — nomi consumati da base.css / inline style =====
+     Ora ALIAS della palette Cool Slate (F3): i selettori legacy di base.css
+     (--bg/--surface/--border/--text/--text-dim) ereditano il nuovo tema senza
+     riscriverli uno per uno. */
+  --bg: var(--surface-0);
+  --surface: var(--surface-2);
+  --border: var(--border-default);
+  --text: var(--text-primary);
+  --text-dim: var(--text-secondary);
+  --radius: var(--radius-md);
+  --font: var(--font-sans);
+
+  /* Orfani consumati da selettori/JS (hero gradient, .error/.btn-danger,
+     .btn-success, presence) — ricondotti al tema. Presence offline resta
+     warm-amber (convenzione "away"), distinto dal verde online. */
+  --accent2: var(--accent-2);
+  --error: var(--danger);
+  --online: var(--success);
+  --offline: #f7b13d;
+}
+
+/* ── Global Resets ───────────────────────────────────────────────────────── */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%;
+  background: var(--surface-0);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── App Shell Standard ──────────────────────────────────────────────────── */
+
+/* The master container. Put <div id="app" class="app-shell"> */
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh; /* Fisso alla viewport: lo scroll avviene dentro i pannelli, non sulla pagina */
+  max-width: 1440px;
+  margin: 0 auto;
+  width: 100%;
+  position: relative;
+  background: var(--surface-0);
+  overflow: hidden; /* Evita scrollbar laterali indesiderate */
+}
+
+/* Standardized App Header */
+.app-header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1rem 1.5rem;
+  /* Glass + glow statico (restyle 2026 F4): un bloom d'accento fisso in alto a
+     sinistra, sopra la superficie glass. Niente keyframe (regola canister: niente
+     animazione decorativa); l'hue segue l'--accent per-app. */
+  background:
+    radial-gradient(70% 140% at 0% 0%, var(--accent-soft), transparent 60%),
+    var(--surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1px solid var(--border-subtle);
+  flex-shrink: 0;
+  z-index: 100;
+  position: sticky;
+  top: 0;
+}
+
+.app-brand {
+  font-weight: 700;
+  font-size: 1.35rem;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.app-brand-accent {
+  background: linear-gradient(135deg, var(--accent), var(--accent-hover));
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Spacer to push actions to the right */
+.app-header-spacer {
+  flex: 1;
+}
+
+.app-actions {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+/* The universal Back to Portal button */
+.btn-portal {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.85rem;
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+  border: 1px solid var(--border-default);
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-decoration: none;
+  transition: all var(--dur) var(--ease);
+  cursor: pointer;
+}
+
+.btn-portal:hover {
+  background: var(--surface-3);
+  color: var(--text-primary);
+  border-color: var(--border-strong);
+}
+
+/* Main Content Area */
+.app-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0; /* Permette ai figli flex con scroll interno di rispettare il bound del padre */
+  overflow: hidden;
+  position: relative;
+  /* Child elements like routers will live here */
+}
+
+/* ── Standardized UI Utilities ───────────────────────────────────────────── */
+
+.glass-panel {
+  background: var(--surface-glass);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+}
+
+/* Mobile responsive adjustments for the shell */
+@media (max-width: 768px) {
+  .app-header {
+    padding: 0.75rem 1rem;
+  }
+  .app-brand {
+    font-size: 1.15rem;
+  }
+}

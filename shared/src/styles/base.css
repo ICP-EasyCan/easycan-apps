@@ -1,0 +1,332 @@
+/* ── Reset & Base ─────────────────────────────────────────────────────────── */
+/* I token vivono in theme.css (fonte unica dal restyle 2026 F1). Qui niente
+   :root: questo file consuma le variabili, non le dichiara. */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body {
+  height: 100%; background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 15px; line-height: 1.5;
+  overflow-x: hidden;
+}
+
+#app { height: 100%; display: flex; flex-direction: column; }
+#route-container { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+input, button { font-family: inherit; font-size: inherit; }
+
+/* ── Utility ──────────────────────────────────────────────────────────────── */
+.mono  { font-family: 'Fira Code', monospace; }
+.small { font-size: 0.82em; }
+.hint  { font-size: 0.82em; color: var(--text-dim); margin-bottom: 0.5rem; }
+.status { font-size: 0.85em; color: var(--text-dim); margin-top: 0.5rem; min-height: 1.2em; }
+.error { color: var(--error); }
+
+.card {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); padding: 1rem;
+}
+
+/* ── Buttons ──────────────────────────────────────────────────────────────── */
+.btn-primary, .btn-secondary, .btn-danger, .btn-success, .btn-text {
+  border: none; border-radius: var(--radius); cursor: pointer;
+  padding: 0.55rem 1.1rem; font-weight: 600; transition: opacity 0.15s;
+}
+.btn-primary   { background: var(--accent);  color: var(--accent-contrast); }
+.btn-secondary { background: var(--surface); color: var(--text); border: 1px solid var(--border); }
+.btn-danger    { background: var(--error);   color: #fff; }
+.btn-success   { background: var(--online);  color: #fff; }
+.btn-text      { background: transparent; color: var(--text-dim); padding: 0.4rem 0.6rem; }
+button:disabled { opacity: 0.4; cursor: not-allowed; }
+button:not(:disabled):hover { opacity: 0.85; }
+button.small { padding: 0.3rem 0.7rem; font-size: 0.85em; }
+
+/* ── Topbar ───────────────────────────────────────────────────────────────── */
+.topbar {
+  display: flex; align-items: center; gap: 0.75rem;
+  padding: 0.75rem 1rem; background: var(--surface);
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.topbar-title { font-weight: 600; flex: 1; }
+.topbar-user  { font-size: 0.82em; color: var(--text-dim); }
+.topbar-right {
+  display: flex; align-items: center; gap: 0.5rem; margin-left: auto;
+}
+
+/* ── Button Icon ──────────────────────────────────────────────────────────── */
+.btn-icon {
+  background: transparent; border: none; cursor: pointer;
+  font-size: 1.2em; padding: 0.3rem 0.5rem; color: var(--text);
+  transition: opacity 0.15s; display: inline-flex; align-items: center; justify-content: center;
+}
+.btn-icon:hover { opacity: 0.7; }
+
+/* ── Form Input ───────────────────────────────────────────────────────────── */
+.form-input {
+  display: block; width: 100%; margin-bottom: 0.6rem;
+  background: var(--bg); border: 1px solid var(--border);
+  border-radius: var(--radius); padding: 0.55rem 0.8rem;
+  color: var(--text); outline: none;
+}
+.form-input:focus { border-color: var(--accent); }
+
+/* ── Modal Overlay ────────────────────────────────────────────────────────── */
+/* Namespaced `sov-modal-*` to avoid colliding with host apps that define their
+   own `.modal-overlay` (e.g. messenger hides it by default, only shown via .show). */
+.sov-modal-overlay {
+  position: fixed; inset: 0; background: rgba(0, 0, 0, 0.5);
+  z-index: 1000; display: flex; align-items: center; justify-content: center;
+}
+
+.sov-modal-dialog {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  max-width: 500px; width: 90%; max-height: 90vh; overflow: auto;
+  display: flex; flex-direction: column;
+}
+
+.sov-modal-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 1.25rem; border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+
+.sov-modal-header h3 { margin: 0; }
+
+.sov-modal-body {
+  padding: 1.25rem; flex: 1; overflow-y: auto;
+  display: flex; flex-direction: column; gap: 1rem;
+}
+
+.sov-modal-footer {
+  display: flex; justify-content: flex-end; gap: 0.75rem;
+  padding: 1.25rem; border-top: 1px solid var(--border); flex-shrink: 0;
+}
+
+.sov-modal-footer button { min-width: 100px; }
+
+/* ── Page: Login ──────────────────────────────────────────────────────────── */
+.page-login {
+  flex: 1; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 2rem; padding: 2rem;
+}
+.hero { text-align: center; }
+.hero h1 { font-size: 2rem; background: linear-gradient(135deg, var(--accent), var(--accent2));
+           -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+.hero .subtitle { color: var(--text-dim); margin-top: 0.4rem; }
+.login-card { display: flex; flex-direction: column; align-items: center; gap: 1rem; }
+
+/* ── Page: Not Owner ─────────────────────────────────────────────────────── */
+.page-not-owner {
+  flex: 1; display: flex; align-items: center; justify-content: center; padding: 2rem;
+}
+.not-owner-box {
+  display: flex; flex-direction: column; align-items: center; gap: 1rem;
+  text-align: center; max-width: 320px;
+}
+.not-owner-icon { font-size: 3rem; }
+.not-owner-box h2 { font-size: 1.3rem; }
+.not-owner-box p { color: var(--text-dim); margin: 0; }
+
+/* ── Page: Settings ──────────────────────────────────────────────────────── */
+.page-settings {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+}
+
+.settings-content {
+  flex: 1; overflow-y: auto; padding: 0;
+}
+
+.settings-section {
+  padding: 1.25rem 1rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-section h3 {
+  font-size: 0.85em; color: var(--text-dim);
+  text-transform: uppercase; letter-spacing: 0.05em;
+  margin-bottom: 0.75rem;
+}
+
+.settings-row {
+  display: flex; align-items: center; gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+.settings-row:last-child { margin-bottom: 0; }
+
+.settings-label {
+  font-weight: 600; font-size: 0.85em; color: var(--text-dim);
+  min-width: 90px; flex-shrink: 0;
+}
+
+.settings-value {
+  flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-size: 0.82em;
+}
+
+/* Verify page (#verify) — hash live, recipe build, badge di match */
+.settings-row-stacked {
+  flex-direction: column; align-items: stretch; gap: 0.3rem;
+}
+.verify-hash {
+  display: block; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.78em; line-height: 1.4; word-break: break-all;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface-2, rgba(255,255,255,0.03)); cursor: text;
+}
+.verify-code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.75em; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+  padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--surface-2, rgba(255,255,255,0.03)); margin: 0.4rem 0 0;
+}
+.verify-match-ok, .verify-match-bad {
+  font-size: 0.85em; font-weight: 600; margin: 0.5rem 0 0;
+}
+.verify-match-ok { color: #16a34a; }
+.verify-match-bad { color: #dc2626; }
+
+.update-status-ok, .update-status-new {
+  font-size: 0.95em; font-weight: 600; margin: 0.25rem 0 0;
+}
+.update-status-ok { color: #16a34a; }
+.update-status-new { color: var(--accent-2, #f7b13d); }
+
+/* Log di progresso del self-upgrade (#update, Fase 2). */
+.update-log { margin-top: 0.5rem; }
+.update-log p { margin: 0.15rem 0; font-family: var(--mono, monospace); font-size: 0.82em; }
+
+/* Lista snapshot per il restore standalone (#update, Fase 3). */
+.update-snapshots { margin-top: 0.5rem; }
+.update-snapshot-row { align-items: center; }
+.update-snapshot-meta { display: flex; flex-direction: column; gap: 0.1rem; }
+.update-snapshot-actions { display: flex; gap: 0.4rem; }
+
+/* Toggle auto-rollback (#update, Fase 3). */
+.update-autorollback { align-items: center; gap: 0.4rem; cursor: pointer; }
+.update-autorollback input { margin: 0; }
+
+.settings-contact {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 0.65rem 0;
+  border-bottom: 1px solid var(--border);
+}
+.settings-contact:last-child { border-bottom: none; }
+
+.settings-notice {
+  padding: 0.75rem 0.9rem;
+  margin-bottom: 0.6rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2, rgba(255,255,255,0.03));
+}
+.settings-notice:last-child { margin-bottom: 0; }
+.settings-notice-title {
+  font-size: 0.88em;
+  font-weight: 600;
+  margin-bottom: 0.35rem;
+  color: var(--text-primary, inherit);
+}
+.settings-notice .hint { display: block; line-height: 1.45; }
+
+.settings-contact-info {
+  display: flex; flex-direction: column; gap: 0.15rem; min-width: 0;
+}
+
+.settings-contact-name {
+  font-weight: 600; font-size: 0.95em;
+}
+
+/* ── Settings extras (Platform / Controllers sections) ──────────────────── */
+.settings-note {
+  margin-bottom: 0.75rem; line-height: 1.5;
+}
+.settings-note:last-child { margin-bottom: 0; }
+
+.settings-divider {
+  border: none; border-top: 1px solid var(--border);
+  margin: 0.85rem 0;
+}
+
+/* colour utility used together with .small */
+.muted { color: var(--text-muted, var(--text-dim)); }
+
+/* ── Controllers section (shared sovereignty builder) ────────────────────────
+   CSS contract for @shared/capabilities/sovereignty/index.js. Lives here so any
+   marketplace app that imports the builder gets the styling for free. */
+
+.controllers-list {
+  list-style: none; padding: 0; margin: 0.25rem 0 0;
+  display: flex; flex-direction: column;
+}
+
+.ctrl-row {
+  display: flex; justify-content: space-between; align-items: flex-start;
+  gap: 0.5rem; flex-wrap: wrap;
+  padding: 0.9rem 0;
+  border-bottom: 1px solid var(--border-subtle, var(--border));
+}
+.ctrl-row:last-child { border-bottom: none; }
+
+.ctrl-info { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+
+.ctrl-hint { margin: 0 0 0.55rem; line-height: 1.45; }
+
+.ctrl-principal {
+  display: block; word-break: break-all;
+  background: var(--surface-2); border: 1px solid var(--border-default, var(--border));
+  padding: 2px 6px; border-radius: var(--radius-sm, 6px);
+  font-size: 0.78em; font-family: var(--font-mono, monospace);
+  color: var(--text-primary, var(--text));
+}
+
+.ctrl-label-tag {
+  display: inline-block; margin-top: 3px;
+  font-size: 0.78em; color: var(--text-muted, var(--text-dim));
+}
+
+.ctrl-actions {
+  display: flex; gap: 0.25rem; align-items: center; flex-shrink: 0;
+}
+
+.ctrl-error {
+  color: var(--error); font-size: 0.82em;
+  flex-basis: 100%; margin-top: 0.25rem; display: none;
+}
+
+/* Disconnected / removed controller row (portal owner removed) */
+.ctrl-row--off .ctrl-principal {
+  opacity: 0.45;
+  color: var(--text-muted, var(--text-dim));
+}
+.ctrl-row--off .ctrl-label-tag {
+  opacity: 0.6;
+}
+
+/* Add-controller row */
+.ctrl-add-row { display: flex; flex-direction: column; gap: 0.4rem; }
+
+.ctrl-add-inputs { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+.ctrl-add-input {
+  flex: 1; min-width: 200px;
+  font-family: var(--font-mono, monospace); font-size: 0.82em;
+  padding: 0.5rem 0.65rem;
+  background: var(--surface-2, var(--surface));
+  border: 1px solid var(--border-default, var(--border));
+  border-radius: var(--radius-sm, 6px);
+  color: var(--text-primary, var(--text));
+  outline: none; transition: border-color 0.15s;
+}
+.ctrl-add-input:focus { border-color: var(--accent); }
+.ctrl-add-input::placeholder { color: var(--text-muted, var(--text-dim)); opacity: 0.7; }
+
+/* ── Mobile Responsive (generico) ────────────────────────────────────────── */
+@media (max-width: 600px) {
+  .topbar { padding: 0.5rem 0.75rem; gap: 0.5rem; }
+  .topbar-title { font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sov-modal-dialog { width: 95%; margin: 0.5rem; }
+  .settings-row { flex-wrap: wrap; }
+  .settings-label { min-width: auto; }
+  .settings-value { white-space: normal; word-break: break-all; }
+  .form-actions { flex-wrap: wrap; }
+  .page-login .hero h1 { font-size: 1.5rem; }
+}

@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>Sovereign EasyChats</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/src/app/styles/messenger.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header id="app-header" class="app-header" style="display: none;">
+      <a href="#chats" class="app-brand">
+        Easy<span class="app-brand-accent">Chats</span>
+      </a>
+      
+      <div class="app-header-spacer"></div>
+      
+      <div class="app-actions">
+        <span id="header-principal" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);"></span>
+        <button id="btn-logout" class="btn-portal" style="background: transparent; border: none; cursor: pointer;">
+          <span>Logout</span>
+        </button>
+      </div>
+    </header>
+
+    <main class="app-content">
+      <div id="app">
+        <!-- Call banner injected dynamically by JS here -->
+        <aside id="chat-list-rail"></aside>
+        <div id="route-container"></div>
+      </div>
+    </main>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

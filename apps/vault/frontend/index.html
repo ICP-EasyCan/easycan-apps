@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Sovereign Vault</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/src/styles/vault.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    
+    <header id="app-header" class="app-header" style="display: none;">
+      <a href="#dashboard" class="app-brand">
+        Sovereign <span class="app-brand-accent">Vault</span>
+      </a>
+      
+      <nav id="top-nav-links" class="nav-links" style="display: flex; gap: 0.25rem;">
+        <a data-route="#dashboard" href="#dashboard">Dashboard</a>
+        <a data-route="#passwords" href="#passwords">Passwords</a>
+        <a data-route="#files" href="#files">Files</a>
+        <a data-route="#notes" href="#notes">Notes</a>
+        <a data-route="#settings" href="#settings">Settings</a>
+      </nav>
+
+      <div class="app-header-spacer"></div>
+      
+      <div class="app-actions">
+        <span id="header-principal" style="font-family: var(--font-mono); font-size: 0.8rem; color: var(--text-muted);"></span>
+        <button id="btn-logout" class="btn-portal" style="background: transparent; border: none; cursor: pointer;">
+          <span>Logout</span>
+        </button>
+      </div>
+    </header>
+
+    <main id="route-container" class="app-content"></main>
+
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

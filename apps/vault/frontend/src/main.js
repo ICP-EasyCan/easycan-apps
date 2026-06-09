@@ -1,0 +1,193 @@
+/**
+ * main.js — Entry point Sovereign Vault
+ *
+ * Personal security vault: Passwords, Files, Notes — encrypted with VetKeys.
+ */
+
+// ─── Blocchi dalla fabbrica ─────────────────────────────────────────────────
+import { bus }                 from '@shared/core/event-bus.js';
+import { CANISTER_ID }         from '@shared/core/config.js';
+import { initAuth, login, logout, isAuthenticated, getPrincipalText }
+                               from '@shared/core/auth.js';
+import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
+                               from '@shared/core/icp.js';
+import { handleDeepLinkClaim }
+                               from '@shared/core/claim.js';
+import { $ }                   from '@shared/ui/dom.js';
+import { route, fallback, startRouter, navigate }
+                               from '@shared/ui/router.js';
+
+// ─── App-specifica ──────────────────────────────────────────────────────────
+import { idlFactory }          from './idl.js';
+import { renderLogin }         from './app/pages/login.js';
+import { renderNotOwner }      from './app/pages/not-owner.js';
+import { renderDashboard }     from './app/pages/dashboard.js';
+import { renderPasswords }     from './app/pages/passwords.js';
+import { renderPasswordEdit }  from './app/pages/password-edit.js';
+import { renderFiles }         from './app/pages/files.js';
+import { renderNotes }         from './app/pages/notes.js';
+import { renderNoteEdit }      from './app/pages/note-edit.js';
+import { renderSettings }      from './app/pages/settings.js';
+import { mountSovereigntyPage } from '@shared/capabilities/sovereignty/page.js';
+import { mountVerifyPage }      from '@shared/capabilities/verify/page.js';
+import { mountUpdatePage }      from '@shared/capabilities/update/page.js';
+import { getPrincipal }         from '@shared/core/auth.js';
+import { clearKeyCache }        from '@shared/core/crypto.js';
+import { initTopNav, removeTopNav }
+                               from './app/components/top-nav.js';
+import { initBottomNav, removeBottomNav }
+                               from './app/components/bottom-nav.js';
+
+// ─── Bootstrap ──────────────────────────────────────────────────────────────
+
+setDefaultIdlFactory(idlFactory);
+
+// Dati per la pagina #verify (segnale di fiducia §A). Riempiti dal release flow
+// (GitHub Release pubblica): il badge ✓ si accende solo se il module_hash live del
+// canister == releaseSha256. Un canister buildato col deploy veloce (cargo-nudo) ha
+// hash diverso → ✗ onesto. Il ✓ richiede una factory coi byte Docker della release
+// (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
+const VERIFY = {
+  repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
+  releaseTag: 'vault-v0.1.0',
+  releaseSha256: 'da6aac325f3bff9640942ecf44f7d97bc2258eec05093fc1c65535c096f44800',
+  dockerPackage: 'vault-canister',
+  e2eeFrontend: true,       // il vault cifra nel frontend → caveat E2EE
+};
+
+// Coordinate self-upgrade. Canale rolling pre-release. `enableInstall` accende il flusso
+// in-app a 6 passi (fetch+verify → chunk → snapshot → install → frontend → health) con
+// auto-rollback + restore standalone. `e2ee` mostra il caveat onesto sul rollback: la
+// master key VetKeys è per-canister deterministica → un rollback non perde la decifratura
+// dei dati esistenti (solo i dati scritti DOPO un cambio di formato sono a rischio).
+const UPGRADE = {
+  repo: 'ICP-EasyCan/easycan-apps', app: 'vault', enableInstall: true, e2ee: true,
+};
+
+async function boot() {
+  await initAuth();
+
+  if (isAuthenticated() && getPrincipalText() === '2vxsx-fae') {
+    await logout();
+  }
+
+  const routeContainer = $('#route-container');
+
+  let appOwnershipVerified = false;
+
+  const requireAuth = async (renderFn, param) => {
+    if (!isAuthenticated()) {
+      navigate('#login');
+      return;
+    }
+    if (!appOwnershipVerified) {
+      const isOwner = await checkOwnership(getPrincipalText());
+      if (!isOwner) return; // checkOwnership naviga a #not-owner
+      appOwnershipVerified = true;
+    }
+    renderFn(param);
+  };
+
+  // ─── Routing ──────────────────────────────────────────────────────────────
+  route('#login',          () => renderLogin(routeContainer));
+  route('#not-owner',      () => renderNotOwner(routeContainer));
+  route('#dashboard',      () => requireAuth(() => renderDashboard(routeContainer)));
+  route('#passwords',      () => requireAuth(() => renderPasswords(routeContainer)));
+  route('#password/*',     ([id]) => requireAuth((param) => renderPasswordEdit(routeContainer, param), id));
+  route('#files',          () => requireAuth(() => renderFiles(routeContainer)));
+  route('#notes',          () => requireAuth(() => renderNotes(routeContainer)));
+  route('#note/*',         ([id]) => requireAuth((param) => renderNoteEdit(routeContainer, param), id));
+  route('#settings',       () => requireAuth(() => renderSettings(routeContainer)));
+  route('#sovereignty',    () => requireAuth(() => mountSovereigntyPage(routeContainer, { canisterId: CANISTER_ID, myPrincipal: getPrincipal() })));
+  route('#verify',         () => requireAuth(() => mountVerifyPage(routeContainer, { canisterId: CANISTER_ID, ...VERIFY })));
+  route('#update',         () => requireAuth(() => mountUpdatePage(routeContainer, { canisterId: CANISTER_ID, ...UPGRADE })));
+  fallback(                () => navigate(isAuthenticated() ? '#dashboard' : '#login'));
+
+  // ─── Auth events ──────────────────────────────────────────────────────────
+  bus.on('auth:login', async () => {
+    const loginCard = document.querySelector('.login-card');
+    if (loginCard) {
+      loginCard.innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; animation: fadeIn 0.4s ease-out;">
+          <div style="display: inline-block; width: 28px; height: 28px; border: 3px solid rgba(13, 148, 136, 0.15); border-top-color: var(--color-primary, #0d9488); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+          <h3 style="margin: 0 0 10px 0; font-weight: 600; font-size: 1.15em; color: var(--color-text);">Configuring App</h3>
+          <p style="margin: 0; font-size: 0.95em; opacity: 0.7; color: var(--color-text);">Registering your ownership on the blockchain...</p>
+        </div>
+        <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        </style>
+      `;
+    }
+
+    setOwnCanisterId(CANISTER_ID);
+    initTopNav();
+    initBottomNav();
+    // Claim BEFORE navigating — without claim, queries fail with "Unauthorized"
+    try {
+      const { claimed } = await handleDeepLinkClaim(CANISTER_ID, { source: 'login' });
+      if (!claimed) await claimIfNeeded();
+      
+      const isOwner = await checkOwnership(getPrincipalText());
+      if (isOwner) {
+        appOwnershipVerified = true;
+        navigate('#dashboard');
+      }
+    } catch (e) {
+      console.error('Claim failed:', e);
+    }
+  });
+
+  bus.on('auth:logout', () => {
+    appOwnershipVerified = false;
+    clearKeyCache();
+    removeTopNav();
+    removeBottomNav();
+    navigate('#login');
+  });
+
+  // ─── Start ────────────────────────────────────────────────────────────────
+  startRouter();
+
+  if (isAuthenticated()) {
+    setOwnCanisterId(CANISTER_ID);
+    initTopNav();
+    initBottomNav();
+    handleDeepLinkClaim(CANISTER_ID, { source: 'boot' })
+      .then(() => checkOwnership(getPrincipalText()))
+      .then(isOwner => { 
+        if (isOwner) appOwnershipVerified = true; 
+      })
+      .catch(console.error);
+  }
+}
+
+async function claimIfNeeded() {
+  try {
+    const existing = await query(CANISTER_ID, 'get_user_principal');
+    if (existing && existing.length > 0) return;
+    const result = await call(CANISTER_ID, 'claim_user_principal');
+    if (result?.Err) console.log('Claim:', result.Err);
+  } catch (e) {
+    console.log('Claim skipped:', e.message);
+  }
+}
+
+async function checkOwnership(myPrincipal) {
+  try {
+    const result = await query(CANISTER_ID, 'get_user_principal');
+    if (result && result.length > 0) {
+      const owner = result[0].toText();
+      if (owner !== myPrincipal) {
+        navigate('#not-owner');
+        return false;
+      }
+    }
+    return true;
+  } catch (e) {
+    console.warn('checkOwnership failed:', e.message);
+    return true;
+  }
+}
+
+boot().catch(console.error);

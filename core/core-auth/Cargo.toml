@@ -1,0 +1,11 @@
+[package]
+name = "core-auth"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core-types.workspace = true
+core-storage.workspace = true
+candid.workspace = true
+ic-cdk.workspace = true
+ic-stable-structures.workspace = true

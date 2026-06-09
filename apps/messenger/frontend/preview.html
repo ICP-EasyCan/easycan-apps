@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Messenger — Vetrina restyle (anteprima)</title>
+  <!-- Stesso CSS reale dell'app (tira dentro theme.css + base.css). -->
+  <link rel="stylesheet" href="/src/app/styles/messenger.css" />
+  <!-- Stile della SOLA vetrina (prefisso pv-). -->
+  <style>
+    html, body { height: auto; overflow: auto; }
+    .pv-wrap { max-width: 1100px; margin: 0 auto; padding: 1.5rem 1rem 6rem; }
+    .pv-top { display: flex; align-items: baseline; gap: 0.75rem; flex-wrap: wrap;
+      padding: 0.75rem 0 1.25rem; border-bottom: 1px solid var(--border-default); margin-bottom: 1.5rem; }
+    .pv-top h1 { font-size: 1.5rem; }
+    .pv-top .pv-note { color: var(--text-muted); font-size: 0.85rem; }
+    .pv-sec { margin: 2.5rem 0; }
+    .pv-sec > h2 { font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-muted); margin-bottom: 0.9rem; border-left: 2px solid var(--accent);
+      padding-left: 0.6rem; }
+    .pv-row { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    .pv-grid { display: grid; gap: 0.75rem; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+    .pv-sw { border-radius: var(--radius-md); border: 1px solid var(--border-default);
+      padding: 0.6rem; font-size: 0.72rem; font-family: var(--font-mono); height: 74px;
+      display: flex; flex-direction: column; justify-content: flex-end; }
+    .pv-device { width: 390px; max-width: 100%; height: 460px; border: 1px solid var(--border-strong);
+      border-radius: var(--radius-lg); overflow: hidden; display: flex; flex-direction: column;
+      background: var(--surface-0); position: relative; }
+    .pv-device .msg-list, .pv-device .chat-list { flex: 1; }
+    .pv-card { background: var(--surface-1); border: 1px solid var(--border-default);
+      border-radius: var(--radius-lg); overflow: hidden; }
+  </style>
+</head>
+<body>
+  <div class="pv-wrap">
+    <div class="pv-top">
+      <h1 class="brand">Easy<span class="brand-highlight">Chats</span></h1>
+      <span class="pv-note">vetrina statica — hot-reload sul CSS · ridimensiona la finestra per il mobile</span>
+    </div>
+
+    <!-- TOKENS / PALETTE -->
+    <section class="pv-sec">
+      <h2>Palette (token themable — F3 ridipinge da qui)</h2>
+      <div class="pv-grid">
+        <div class="pv-sw" style="background:var(--surface-0)">surface-0</div>
+        <div class="pv-sw" style="background:var(--surface-1)">surface-1</div>
+        <div class="pv-sw" style="background:var(--surface-2)">surface-2</div>
+        <div class="pv-sw" style="background:var(--surface-3)">surface-3</div>
+        <div class="pv-sw" style="background:var(--accent);color:var(--accent-contrast)">accent</div>
+        <div class="pv-sw" style="background:var(--accent-soft)">accent-soft</div>
+        <div class="pv-sw" style="background:var(--success);color:#08210f">success</div>
+        <div class="pv-sw" style="background:var(--danger);color:#2a0606">danger</div>
+        <div class="pv-sw" style="background:var(--accent2);color:#04201c">accent2 (legacy)</div>
+        <div class="pv-sw" style="background:var(--online);color:#03210f">online</div>
+      </div>
+    </section>
+
+    <!-- TYPOGRAPHY -->
+    <section class="pv-sec">
+      <h2>Tipografia</h2>
+      <div class="topbar" style="position:relative">
+        <span class="topbar-title">Chats</span>
+      </div>
+      <p style="margin-top:.6rem">Corpo del testo standard a 15px, line-height 1.5.</p>
+      <p class="hint">.hint — testo di aiuto attenuato</p>
+      <p class="mono small">.mono.small — principal a2b3c-def45-...-cai</p>
+    </section>
+
+    <!-- BUTTONS -->
+    <section class="pv-sec">
+      <h2>Bottoni</h2>
+      <div class="pv-row">
+        <button class="btn-primary">Primary</button>
+        <button class="btn-secondary">Secondary</button>
+        <button class="btn-success">Success</button>
+        <button class="btn-danger">Danger</button>
+        <button class="btn-text">Text</button>
+        <button class="btn-primary" disabled>Disabled</button>
+        <button class="btn-icon">📞</button>
+      </div>
+    </section>
+
+    <!-- CHAT LIST -->
+    <section class="pv-sec">
+      <h2>Chat list (letta / non letta)</h2>
+      <div class="pv-card" style="max-width:480px">
+        <div class="chat-list">
+          <div class="chat-item chat-item-unread">
+            <div class="avatar">A</div>
+            <div class="chat-item-body">
+              <div class="chat-item-top">
+                <span class="chat-item-name">Alice</span>
+                <span class="chat-item-time">12:04</span>
+              </div>
+              <div class="chat-item-bottom">
+                <span class="chat-item-preview">Ci vediamo dopo?</span>
+                <span class="chat-item-dot"></span>
+              </div>
+            </div>
+          </div>
+          <div class="chat-item">
+            <div class="avatar">B</div>
+            <div class="chat-item-body">
+              <div class="chat-item-top">
+                <span class="chat-item-name">Bob</span>
+                <span class="chat-item-time">ieri</span>
+              </div>
+              <div class="chat-item-bottom">
+                <span class="chat-item-preview">Perfetto, grazie 👍</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- MESSAGE BUBBLES -->
+    <section class="pv-sec">
+      <h2>Bolle messaggi</h2>
+      <div class="pv-card" style="max-width:480px">
+        <div class="msg-list">
+          <div class="msg msg-peer"><div class="msg-text">Ciao! Come va?</div><span class="msg-time">12:01</span></div>
+          <div class="msg msg-me"><div class="msg-text">Tutto bene, tu?</div><span class="msg-time">12:02</span></div>
+          <div class="msg msg-system"><div class="msg-text">Chiamata persa</div></div>
+          <div class="msg msg-me msg-failed"><div class="msg-text">Non inviato</div><span class="msg-error">Invio fallito</span>
+            <div class="msg-actions"><button class="msg-action-btn">Riprova</button><button class="msg-action-btn msg-action-discard">Scarta</button></div>
+          </div>
+        </div>
+        <div class="chat-input">
+          <input placeholder="Scrivi un messaggio…" />
+          <button class="btn-icon">➤</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- CONTACTS -->
+    <section class="pv-sec">
+      <h2>Contatti</h2>
+      <div class="pv-card" style="max-width:480px">
+        <div class="contacts-list">
+          <div class="contact-card">
+            <div class="avatar">A</div>
+            <div class="contact-info">
+              <span class="contact-name">Alice</span>
+              <span class="contact-cid">rrkah-fqaaa-aaaaa-aaaaq-cai</span>
+              <span class="contact-presence">online</span>
+            </div>
+            <div class="contact-actions"><button class="btn-icon">💬</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- CALL BANNER STATES -->
+    <section class="pv-sec">
+      <h2>Call banner (stati)</h2>
+      <div style="max-width:480px;display:flex;flex-direction:column;gap:.5rem">
+        <div class="call-banner state-incoming">
+          <span class="call-banner-text">Chiamata in arrivo · Alice</span>
+          <div class="call-banner-actions">
+            <button class="call-banner-btn call-banner-accept">Accetta</button>
+            <button class="call-banner-btn call-banner-reject">Rifiuta</button>
+          </div>
+        </div>
+        <div class="call-banner">
+          <span class="call-banner-text">In chiamata · <span class="call-banner-timer">00:42</span></span>
+          <div class="call-banner-actions">
+            <button class="call-banner-btn call-banner-mute">Muto</button>
+            <button class="call-banner-btn call-banner-hangup">Chiudi</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SETTINGS + CONTROLLERS (shared) -->
+    <section class="pv-sec">
+      <h2>Settings + Sovereignty (condivisi)</h2>
+      <div class="pv-card" style="max-width:560px">
+        <div class="settings-section">
+          <h3>Account</h3>
+          <div class="settings-row"><span class="settings-label">Principal</span><span class="settings-value mono">a2b3c-def45-ghij6-klmno-cai</span></div>
+        </div>
+        <div class="settings-section">
+          <h3>Controllers</h3>
+          <ul class="controllers-list">
+            <li class="ctrl-row">
+              <div class="ctrl-info"><code class="ctrl-principal">2vxsx-fae-...-tu</code><span class="ctrl-label-tag">tu (proprietario)</span></div>
+              <div class="ctrl-actions"><button class="btn-text small">rimuovi</button></div>
+            </li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <!-- APP SHELL DEVICE + BOTTOM NAV -->
+    <section class="pv-sec">
+      <h2>App shell + bottom-nav (mobile)</h2>
+      <div class="pv-device">
+        <div class="topbar" style="position:relative"><span class="brand">Easy<span class="brand-highlight">Chats</span></span></div>
+        <div class="chat-list">
+          <div class="chat-item chat-item-unread">
+            <div class="avatar sm">A</div>
+            <div class="chat-item-body">
+              <div class="chat-item-top"><span class="chat-item-name">Alice</span><span class="chat-item-time">12:04</span></div>
+              <div class="chat-item-bottom"><span class="chat-item-preview">Ci vediamo dopo?</span><span class="chat-item-dot"></span></div>
+            </div>
+          </div>
+        </div>
+        <nav class="bottom-nav">
+          <button class="bottom-nav-tab active"><span class="bottom-nav-icon">💬</span><span class="bottom-nav-label">Chats</span></button>
+          <button class="bottom-nav-tab"><span class="bottom-nav-icon">👥</span><span class="bottom-nav-label">Contatti</span></button>
+          <button class="bottom-nav-tab"><span class="bottom-nav-icon">⚙️</span><span class="bottom-nav-label">Settings</span></button>
+        </nav>
+        <button class="fab" style="bottom:5rem">+</button>
+      </div>
+    </section>
+  </div>
+</body>
+</html>

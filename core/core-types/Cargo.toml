@@ -1,0 +1,9 @@
+[package]
+name = "core-types"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+candid.workspace = true
+ic-stable-structures.workspace = true
+serde.workspace = true

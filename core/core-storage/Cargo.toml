@@ -1,0 +1,8 @@
+[package]
+name = "core-storage"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core-types.workspace = true
+ic-stable-structures.workspace = true

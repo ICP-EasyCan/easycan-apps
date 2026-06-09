@@ -1,0 +1,13 @@
+# Tieni fuori dal build context Docker tutto ciò che non serve a compilare il WASM
+# (e che romperebbe la riproducibilità o gonfierebbe il context).
+target/
+**/target/
+node_modules/
+**/node_modules/
+.dfx/
+**/.dfx/
+.git/
+dist/
+**/dist/
+out/
+*.wasm
