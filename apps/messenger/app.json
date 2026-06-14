@@ -5,7 +5,7 @@
   "short_description": "Private messaging on the Internet Computer",
   "category": "Communication",
   "price_e8s_xdr": 100000000,
-  "full_description": "Sovereign Messenger is a decentralized messaging app running entirely on the Internet Computer. Real-time chat, voice messages, and file sharing — no third-party servers, no centralized logs. You own your canister.",
+  "full_description": "EasyChat is a decentralized messaging app running entirely on the Internet Computer. Real-time chat, voice messages, and file sharing — no third-party servers, no centralized logs. You own your canister.",
   "features": [
     "Real-time messaging",
     "Voice messages",

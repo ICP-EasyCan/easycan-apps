@@ -5,7 +5,7 @@
   "short_description": "End-to-end encrypted password, file, and notes vault on ICP",
   "category": "Security",
   "price_e8s_xdr": 100000000,
-  "full_description": "Sovereign Vault is a personal security vault running entirely on the Internet Computer. Store passwords, encrypted files, and private notes with end-to-end encryption via VetKeys. No cloud, no third parties — your data is yours.",
+  "full_description": "EasySafe is a personal security vault running entirely on the Internet Computer. Store passwords, encrypted files, and private notes with end-to-end encryption via VetKeys. No cloud, no third parties — your data is yours.",
   "features": [
     "Password manager with strong encryption",
     "Encrypted file storage (up to 60KB per file)",

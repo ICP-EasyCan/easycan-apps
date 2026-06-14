@@ -28,6 +28,7 @@ import { mountInstallPage }     from '@shared/capabilities/update/handoff-page.j
 import { idlFactory }          from './idl.js';
 import { renderLogin }         from './app/pages/login.js';
 import { renderNotOwner }      from './app/pages/not-owner.js';
+import { renderVerifyFailed }  from './app/pages/verify-failed.js';
 import { renderChats }         from './app/pages/chats.js';
 import { renderChat }          from './app/pages/chat.js';
 import { renderContacts }      from './app/pages/contacts.js';
@@ -101,6 +102,7 @@ async function boot() {
   // ─── Routing (le pagine renderizzano dentro routeContainer) ─────────────
   route('#login',         () => renderLogin(routeContainer));
   route('#not-owner',     () => renderNotOwner(routeContainer));
+  route('#verify-failed', () => renderVerifyFailed(routeContainer));
   route('#chats',         () => requireAuth(() => renderChats(routeContainer)));
   route('#chat/*',        ([param]) => requireAuth((p) => renderChat(routeContainer, p), param));
   route('#contacts',      () => requireAuth(() => renderContacts(routeContainer)));
@@ -219,30 +221,37 @@ async function claimIfNeeded() {
 }
 
 /**
- * Verifica che il principal loggato sia il proprietario del canister.
- * Se il canister non ha ancora un proprietario (user_principal = null),
- * l'accesso è libero (flusso onboarding).
+ * Gate di proprietà — FAIL-CLOSED. Tre esiti distinti:
+ *  - owner verificato == me            → accesso (true)
+ *  - owner verificato presente e != me → #not-owner (false): appartiene a un altro
+ *  - query in errore OPPURE owner vuoto → #verify-failed (false): proprietà NON
+ *    verificabile → niente accesso. Mai dare l'app su un dubbio: un errore di rete
+ *    transitorio (o canister lento) non deve far entrare un non-owner.
+ * L'owner vuoto è sicuro come fail-closed: nel login `claimIfNeeded` gira PRIMA e
+ * popola l'owner; se resta vuoto il claim non è andato → giusto non dare accesso.
  * @param {string} myPrincipal
  * @returns {Promise<boolean>} true = accesso consentito
  */
 async function checkOwnership(myPrincipal) {
+  let result;
   try {
-    const result = await query(CANISTER_ID, 'get_user_principal');
-    // result è Option<Principal>: [] = None, [Principal] = Some
-    if (result && result.length > 0) {
-      const owner = result[0].toText();
-      if (owner !== myPrincipal) {
-        navigate('#not-owner');
-        return false;
-      }
-    }
-    // null o canister non ancora claimato → accesso libero
-    return true;
+    result = await query(CANISTER_ID, 'get_user_principal');
   } catch (e) {
-    // Query fallita (es. canister non raggiungibile) → non bloccare
     console.warn('checkOwnership failed:', e.message);
-    return true;
+    navigate('#verify-failed');
+    return false;
   }
+  // result è Option<Principal>: [] = None (owner non ancora registrato)
+  if (!result || result.length === 0) {
+    navigate('#verify-failed');
+    return false;
+  }
+  const owner = result[0].toText();
+  if (owner !== myPrincipal) {
+    navigate('#not-owner');
+    return false;
+  }
+  return true;
 }
 
 boot().catch(console.error);

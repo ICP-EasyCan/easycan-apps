@@ -23,6 +23,7 @@ import { route, fallback, startRouter, navigate }
 import { idlFactory }          from './idl.js';
 import { renderLogin }         from './app/pages/login.js';
 import { renderNotOwner }      from './app/pages/not-owner.js';
+import { renderVerifyFailed }  from './app/pages/verify-failed.js';
 import { renderDashboard }     from './app/pages/dashboard.js';
 import { renderPasswords }     from './app/pages/passwords.js';
 import { renderPasswordEdit }  from './app/pages/password-edit.js';
@@ -111,6 +112,7 @@ async function boot() {
   // ─── Routing ──────────────────────────────────────────────────────────────
   route('#login',          () => renderLogin(routeContainer));
   route('#not-owner',      () => renderNotOwner(routeContainer));
+  route('#verify-failed',  () => renderVerifyFailed(routeContainer));
   route('#dashboard',      () => requireAuth(() => renderDashboard(routeContainer)));
   route('#passwords',      () => requireAuth(() => renderPasswords(routeContainer)));
   route('#password/*',     ([id]) => requireAuth((param) => renderPasswordEdit(routeContainer, param), id));
@@ -199,21 +201,36 @@ async function claimIfNeeded() {
   }
 }
 
+/**
+ * Gate di proprietà — FAIL-CLOSED. Tre esiti distinti:
+ *  - owner verificato == me            → accesso (true)
+ *  - owner verificato presente e != me → #not-owner (false): appartiene a un altro
+ *  - query in errore OPPURE owner vuoto → #verify-failed (false): proprietà NON
+ *    verificabile → niente accesso. Mai dare la dashboard su un dubbio: un errore di
+ *    rete transitorio (o canister lento) non deve far entrare un non-owner.
+ * L'owner vuoto è sicuro come fail-closed: nel login `claimIfNeeded` gira PRIMA e
+ * popola l'owner; se resta vuoto il claim non è andato → giusto non dare accesso.
+ */
 async function checkOwnership(myPrincipal) {
+  let result;
   try {
-    const result = await query(CANISTER_ID, 'get_user_principal');
-    if (result && result.length > 0) {
-      const owner = result[0].toText();
-      if (owner !== myPrincipal) {
-        navigate('#not-owner');
-        return false;
-      }
-    }
-    return true;
+    result = await query(CANISTER_ID, 'get_user_principal');
   } catch (e) {
     console.warn('checkOwnership failed:', e.message);
-    return true;
+    navigate('#verify-failed');
+    return false;
   }
+  // result è Option<Principal>: [] = None (owner non ancora registrato)
+  if (!result || result.length === 0) {
+    navigate('#verify-failed');
+    return false;
+  }
+  const owner = result[0].toText();
+  if (owner !== myPrincipal) {
+    navigate('#not-owner');
+    return false;
+  }
+  return true;
 }
 
 boot().catch(console.error);
