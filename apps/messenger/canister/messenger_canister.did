@@ -1,3 +1,25 @@
+// Metadati dell'app esposti al marketplace.
+type AppMetadata = record {
+  admin : opt principal;
+  ejected : bool;
+  // Identita' portale del buyer (P_portal). None se l'app e' standalone,
+  // se non e' stato ancora settato, o se e' stato rimosso post-eject.
+  // Quando Some, il portale del marketplace ha (o aveva) accesso autenticato.
+  portal_owner : opt principal;
+  // Tier corrente: 0=demo, 1=pro.
+  tier : nat8;
+  is_standalone : bool;
+  spawner : opt principal;
+  // Portal owner originale, conservato anche post-eject. Post-A2 e' solo
+  // l'ancora di rifiuto che impedisce di ri-aggiungere P_portal come controller.
+  original_portal_owner : opt principal;
+  // Spawner originale, conservato anche post-eject. Identifica il marketplace
+  // di provenienza; usato per escludere EasyCan dalle backup-key dell'utente.
+  original_spawner : opt principal;
+  // Hash SHA256 del WASM installato (hex string). None = non ancora impostato.
+  // L'utente puo' verificare autonomamente l'integrita' del WASM.
+  wasm_hash : opt text;
+};
 // Input dal frontend — senza id (assegnato dal backend).
 type ArchiveInput = record {
   from_me : bool;
@@ -10,6 +32,19 @@ type ArchivedMessage = record {
   from_me : bool;
   timestamp : nat64;
   payload : blob;
+};
+// # Canister Status Type
+// 
+// Status of a canister.
+// 
+// See [`CanisterStatusResult::status`].
+type CanisterStatusType = variant {
+  // The canister is stopped.
+  stopped;
+  // The canister is stopping.
+  stopping;
+  // The canister is running.
+  running;
 };
 // Contesto di derivazione — determina l'input per VetKeys.
 type DerivationContext = variant {
@@ -43,6 +78,8 @@ type Result_1 = variant { Ok : nat64; Err : text };
 type Result_2 = variant { Ok : text; Err : text };
 type Result_3 = variant { Ok : PresenceInfo; Err : text };
 type Result_4 = variant { Ok : LeaveMessageResult; Err : text };
+type Result_5 = variant { Ok : principal; Err : text };
+type Result_6 = variant { Ok : Status; Err : text };
 type SignalEntry = record {
   id : nat64;
   to : principal;
@@ -50,8 +87,29 @@ type SignalEntry = record {
   timestamp : nat64;
   sig_type : WebRtcSignalType;
 };
+// Stato runtime del canister (cicli/memoria/controllers), esposto da
+// `platform_status`. **Sovranita' ≠ opacita':** i campi sono `Option` per
+// permettere la **redazione per-campo** ai chiamanti non autorizzati (stesso
+// principio di `app_metadata_for`, che mette i principal a `None`). Regole:
+// 
+// - `module_hash`: MAI redatto (invariante di verificabilita': nasconderlo non
+// protegge il proprietario, toglie a chi interagisce con lui la verifica del
+// codice). `None` solo se il canister e' vuoto.
+// - `controllers`: viewer-gated SEMPRE (unico campo correlante). `None` per i
+// non-viewer.
+// - `status`/`cycles`/`memory_size`/`freezing_threshold`: pubblici per default;
+// `None` per i non-viewer SOLO se `private_ops` e' acceso (opacita' sovrana
+// senza danno a terzi).
+type Status = record {
+  status : opt CanisterStatusType;
+  freezing_threshold : opt nat;
+  controllers : opt vec principal;
+  memory_size : opt nat;
+  cycles : opt nat;
+  module_hash : opt blob;
+};
 type WebRtcSignalType = variant { Answer; Offer; IceCandidate };
-service : (principal) -> {
+service : (principal, principal) -> {
   ack_messages : (vec nat64) -> (Result);
   ack_signals : (vec nat64) -> (Result);
   add_to_whitelist : (principal) -> (Result);
@@ -86,6 +144,22 @@ service : (principal) -> {
   leave_message : (principal, blob, nat64) -> (Result_4);
   notify_pending_call : (principal) -> (Result);
   notify_pending_message : (principal) -> (Result);
+  platform_add_controller : (principal) -> (Result);
+  platform_claim : (blob) -> (Result_5);
+  platform_cycles : () -> (nat) query;
+  platform_eject : (bool) -> (Result);
+  platform_get_admin : () -> (opt principal) query;
+  platform_get_tier : () -> (nat8) query;
+  platform_init_admin : (principal) -> (Result);
+  platform_is_standalone : () -> (bool) query;
+  platform_metadata : () -> (AppMetadata) query;
+  platform_remove_controller : (principal) -> (Result);
+  platform_remove_portal : () -> (Result);
+  platform_set_portal_owner : (principal) -> (Result);
+  platform_set_private_ops : (bool) -> (Result);
+  platform_set_status_viewers : (vec principal) -> (Result);
+  platform_set_tier : (nat8, opt nat64) -> (Result);
+  platform_status : () -> (Result_6);
   post_signal : (principal, WebRtcSignalType, text) -> (Result);
   remove_from_whitelist : (principal) -> (Result);
   set_chat_persistent : (principal, bool) -> (Result);

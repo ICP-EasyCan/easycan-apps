@@ -65,38 +65,13 @@ function unwrap(res) {
 }
 
 /**
- * Concede il supporto EasyCan: ri-aggiunge lo spawner come controller (NON
- * riporta a managed). `sp` è di norma `original_spawner`.
- * @param {string} cid
- * @param {import('@dfinity/principal').Principal} sp
- */
-export function grantSupport(cid, sp) {
-  return call(cid, 'platform_add_controller', sp).then(unwrap);
-}
-
-/**
- * Revoca il supporto EasyCan: rimuove lo spawner dai controller.
- * @param {string} cid
- * @param {import('@dfinity/principal').Principal} sp
- */
-export function revokeSupport(cid, sp) {
-  return call(cid, 'platform_remove_controller', sp).then(unwrap);
-}
-
-/**
- * Rimuove il portal_owner (spegne la dashboard EasyCan).
+ * Rimuove il portal_owner (spegne la dashboard EasyCan). Permanente: A2 (#3) ha
+ * ritirato `platform_restore_portal` — P_portal non e' ri-aggiungibile come
+ * controller. Recovery resta IC-native via una backup-key che possiedi altrove.
  * @param {string} cid
  */
 export function removePortal(cid) {
   return call(cid, 'platform_remove_portal').then(unwrap);
-}
-
-/**
- * Ripristina il portal_owner (riaccende la dashboard EasyCan).
- * @param {string} cid
- */
-export function restorePortal(cid) {
-  return call(cid, 'platform_restore_portal').then(unwrap);
 }
 
 /**

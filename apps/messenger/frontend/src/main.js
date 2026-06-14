@@ -14,6 +14,8 @@ import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
                                from '@shared/core/icp.js';
 import { handleDeepLinkClaim }
                                from '@shared/core/claim.js';
+import { getInstallParamsFromUrl, stashInstallParams, cleanInstallFromUrl, getPendingInstall }
+                               from '@shared/capabilities/update/handoff.js';
 import { $ }                   from '@shared/ui/dom.js';
 import { route, fallback, startRouter, navigate }
                                from '@shared/ui/router.js';
@@ -22,6 +24,7 @@ import { route, fallback, startRouter, navigate }
 import { mountSovereigntyPage } from '@shared/capabilities/sovereignty/page.js';
 import { mountVerifyPage }      from '@shared/capabilities/verify/page.js';
 import { mountUpdatePage }      from '@shared/capabilities/update/page.js';
+import { mountInstallPage }     from '@shared/capabilities/update/handoff-page.js';
 import { idlFactory }          from './idl.js';
 import { renderLogin }         from './app/pages/login.js';
 import { renderNotOwner }      from './app/pages/not-owner.js';
@@ -71,6 +74,15 @@ async function boot() {
   // Route container per App Shell
   const routeContainer = $('#route-container');
 
+  // Deep-link cambio-app (Arco B): atterriamo con ?install=<app>&token=<hex> dal portale.
+  // Stash + pulisci l'URL subito (sopravvive a login/relogin; back/refresh non ri-scatta).
+  // Il reinstall vero parte solo dalla pagina #install, dietro conferma esplicita.
+  const installParams = getInstallParamsFromUrl();
+  if (installParams) {
+    stashInstallParams(installParams);
+    cleanInstallFromUrl();
+  }
+
   let appOwnershipVerified = false;
 
   const requireAuth = async (renderFn, param) => {
@@ -97,6 +109,7 @@ async function boot() {
   route('#sovereignty',   () => requireAuth(() => mountSovereigntyPage(routeContainer, { canisterId: CANISTER_ID, myPrincipal: getPrincipal() })));
   route('#verify',        () => requireAuth(() => mountVerifyPage(routeContainer, { canisterId: CANISTER_ID, ...VERIFY })));
   route('#update',        () => requireAuth(() => mountUpdatePage(routeContainer, { canisterId: CANISTER_ID, ...UPGRADE })));
+  route('#install',       () => requireAuth(() => mountInstallPage(routeContainer, { canisterId: CANISTER_ID, repo: UPGRADE.repo })));
   fallback(               () => navigate(isAuthenticated() ? '#chats' : '#login'));
 
   // ─── Auth events ─────────────────────────────────────────────────────────
@@ -139,7 +152,8 @@ async function boot() {
         initBottomNav();
         initDesktopRail();
         initConnectionManager();
-        navigate('#chats');
+        // Cambio-app pendente (Arco B): vai al ricevitore invece che alla home.
+        navigate(getPendingInstall() ? '#install' : '#chats');
       }
     } catch (e) {
       console.error('Login flow error:', e);
@@ -179,10 +193,12 @@ async function boot() {
     // Eccezione: deep link claim (?claim=<token>) è un'azione esplicita dell'utente.
     handleDeepLinkClaim(CANISTER_ID, { source: 'boot' })
       .then(() => checkOwnership(getPrincipalText()))
-      .then(isOwner => { 
+      .then(isOwner => {
         if (isOwner) {
           appOwnershipVerified = true;
-          initConnectionManager(); 
+          initConnectionManager();
+          // Cambio-app pendente (Arco B): apri il ricevitore.
+          if (getPendingInstall()) navigate('#install');
         }
       })
       .catch(console.error);

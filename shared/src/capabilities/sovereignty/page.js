@@ -46,7 +46,7 @@ export function sovereigntyLinkSection(targetRoute = '#sovereignty') {
     title: 'Sovereignty',
     content: [
       el('p', { class: 'settings-note small muted' },
-        'Manage who controls this app: the EasyCan support safety net and ' +
+        'Manage who controls this app: add a backup key for recovery, and review ' +
         'your controllers.'),
       el('div', { class: 'settings-row' },
         el('button', {

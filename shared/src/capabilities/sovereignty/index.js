@@ -45,10 +45,9 @@
 
 import { el } from '../../ui/dom.js';
 import { Principal } from '@dfinity/principal';
-import { parseMetadata, deriveSovereignty, controllersInclude } from '../../core/sovereignty.js';
+import { parseMetadata, deriveSovereignty, deriveBackupKeys, systemPrincipals } from '../../core/sovereignty.js';
 import {
-  grantSupport, revokeSupport,
-  addController, removeController, removePortal, restorePortal,
+  addController, removeController, removePortal,
 } from '../../core/platform.js';
 
 /**
@@ -82,24 +81,23 @@ export function buildSovereigntySections({
   onChanged = null,
 }) {
   const platform = buildPlatformSection(meta, controllers, canisterId, onChanged);
+  const backup = buildBackupKeySection(meta, {
+    controllers, mgmtError, appAdmin, myPrincipal, canisterId, onChanged,
+  });
   const ctrls = buildControllersSection(meta, {
     controllers, mgmtError, appAdmin, myPrincipal, canisterId, onChanged,
   });
-  return [platform, ctrls].filter(Boolean);
+  return [platform, backup, ctrls].filter(Boolean);
 }
 
 // ─── Platform section (ex eject.js) ──────────────────────────────────────────
 //
 // Modello binario, sovrano-di-default: dopo il claim l'app è SEMPRE emancipated
-// (EasyCan non è controller). L'unico asse è il supporto EasyCan, opt-in:
-//   Sovereign · support off → Grant EasyCan support (aggiunge lo spawner ai controller)
-//   Sovereign · support on  → Revoke EasyCan support (lo rimuove)
-//
-// "Grant support" NON ridà l'app a EasyCan in gestione: aggiunge solo lo spawner
-// ai controller per dargli il controllo IC necessario al supporto (status,
-// top-up, fix/upgrade). L'utente resta admin e unica autorità; può revocare in
-// ogni momento. Il vecchio stato "Managed" + "Take control" non esiste più:
-// l'app esce dal claim già sovrana.
+// (EasyCan non è controller, e post-F4 non è più ri-aggiungibile —
+// `cap-platform::add_controller` rifiuta lo spawner). Non c'è alcun asse
+// "support": l'app esce dal claim sovrana e resta sovrana. L'unico stato residuo
+// è l'accesso del portale (la dashboard EasyCan), gestito nella sezione
+// Controllers. Il vecchio "Managed" + "Take control" non esiste più.
 
 /**
  * @param {Record<string, any> | null} meta  risultato di platform_metadata, o null
@@ -112,7 +110,6 @@ function buildPlatformSection(meta, controllers, canisterId, onChanged = null) {
   if (!m) return null;
 
   const sov = deriveSovereignty(m, controllers);
-  const originalSpawner = m.originalSpawner;
   const rows = [];
 
   if (sov.mode === 'standalone') {
@@ -129,99 +126,20 @@ function buildPlatformSection(meta, controllers, canisterId, onChanged = null) {
     rows.push(noteEl(
       'EasyCan is finishing setup of this canister. Once setup completes the app ' +
       'becomes sovereign automatically — you are the owner and admin, and EasyCan ' +
-      'support is off until you choose to turn it on.'
+      'is not a controller of the canister.'
     ));
-  } else if (sov.supportGranted) {
-    rows.push(infoRow('Mode', 'Sovereign'));
-    rows.push(infoRow('EasyCan support', 'On — safety net'));
-    rows.push(noteEl(
-      'You\'re sovereign, with a safety net. While support is on, EasyCan is a controller of ' +
-      'this canister — control is temporarily shared. EasyCan can inspect status, top up ' +
-      'cycles, and apply fixes or updates. You stay the admin and can revoke this access ' +
-      'whenever you want.'
-    ));
-    rows.push(el('div', { class: 'settings-row' }, buildRevokeSupportBtn(originalSpawner, canisterId, onChanged)));
   } else {
     rows.push(infoRow('Mode', 'Sovereign'));
-    rows.push(infoRow('EasyCan support', 'Off — self-custody'));
     rows.push(infoRow('Portal access', sov.portalRemoved ? 'Off — monitor via NNS' : 'On'));
     rows.push(noteEl(sov.portalRemoved
       ? 'Full self-custody, and the EasyCan portal can\'t read this canister either — monitor ' +
-        'cycles via NNS. Top-up from the EasyCan Dashboard still works. You can grant EasyCan ' +
-        'support (which also restores portal read access) whenever you want.'
-      : 'Full self-custody by default: EasyCan is not a controller of this canister — you stand ' +
-        'on your own from the start. The EasyCan portal can still read your canister\'s cycles ' +
-        'and status. You can grant EasyCan support access, and revoke it whenever you want.'
+        'cycles via NNS. Top-up from the EasyCan Dashboard still works.'
+      : 'Full self-custody: EasyCan is not a controller of this canister — you stand on your ' +
+        'own. The EasyCan portal can still read your canister\'s cycles and status.'
     ));
-    rows.push(el('div', { class: 'settings-row' }, buildGrantSupportBtn(originalSpawner, canisterId, sov.portalRemoved, onChanged)));
   }
 
   return { title: 'Platform', content: rows };
-}
-
-function buildGrantSupportBtn(originalSpawner, canisterId, portalRemoved = false, onChanged = null) {
-  if (!originalSpawner) {
-    return el('button', { class: 'btn-secondary', disabled: true }, 'Support unavailable');
-  }
-  const bullets = [
-    'EasyCan becomes a controller of this canister again, so while support is on control is shared: it can inspect status, top up cycles, and apply fixes or updates.',
-    'You stay the owner and admin of the app — this does NOT hand it back to EasyCan management.',
-    'You can revoke support at any time from this Platform section.',
-  ];
-  if (portalRemoved) {
-    // Support on ⟹ EasyCan dashboard on. The dashboard is currently off, so granting
-    // support will turn it back on too (we restore it first to never pass through the
-    // invalid "support on + dashboard off" state).
-    bullets.push('Your EasyCan dashboard is currently off; granting support turns it back on so cycles and status stay visible.');
-  }
-  return el(
-    'button',
-    {
-      class: 'btn-secondary',
-      onclick: () => openConfirmModal({
-        title: 'Grant EasyCan support',
-        intro: 'This adds EasyCan back as a controller of this canister so we can help you. After granting:',
-        bullets,
-        confirmLabel: 'Grant support',
-        confirmClass: 'btn-primary',
-        busyLabel: 'Granting…',
-        action: async () => {
-          // Restore the dashboard FIRST so we never sit in "support on + dashboard off"
-          // (invariant: support on ⟹ portal on). If granting then fails, we stay in a
-          // valid state (emancipated, dashboard on, no support).
-          if (portalRemoved) await restorePortal(canisterId);
-          await grantSupport(canisterId, originalSpawner);
-        },
-        onChanged,
-      }),
-    },
-    'Grant EasyCan support',
-  );
-}
-
-function buildRevokeSupportBtn(originalSpawner, canisterId, onChanged = null) {
-  return el(
-    'button',
-    {
-      class: 'btn-secondary',
-      onclick: () => openConfirmModal({
-        title: 'Revoke EasyCan support',
-        intro: 'This removes EasyCan from the controllers of this canister. After revoking:',
-        bullets: [
-          'EasyCan can no longer automatically inspect status, apply fixes, or top up cycles on your behalf.',
-          'Manual top-up from the EasyCan Dashboard still works.',
-          'You remain the admin and sole authority, exactly as before.',
-          'You can grant support again at any time.',
-        ],
-        confirmLabel: 'Revoke support',
-        confirmClass: 'btn-primary',
-        busyLabel: 'Revoking…',
-        action: () => revokeSupport(canisterId, originalSpawner),
-        onChanged,
-      }),
-    },
-    'Revoke EasyCan support',
-  );
 }
 
 // ─── Generic confirm modal ───────────────────────────────────────────────────
@@ -344,6 +262,173 @@ function openConfirmModal(opts) {
   setTimeout(() => confirmBtn.focus(), 50);
 }
 
+// ─── Backup key section ──────────────────────────────────────────────────────
+//
+// F2 del piano self-install: dare all'utente lo strumento di recovery *prima* di
+// togliergli la rete di P_portal (F3). Una "backup key" è semplicemente un
+// controller IC aggiunto dall'utente — un'identità che possiede ALTROVE (un
+// principal dfx, o una seconda Internet Identity). Serve a due cose:
+//   1. Recovery: se perde il login di quest'app, riprende il controllo del
+//      canister con la backup key (a livello IC: dfx/NNS — la UI in-app richiede
+//      il login admin, che è proprio ciò che ha perso).
+//   2. Cruscotto-unico sovrano: riusando la STESSA backup key su tutte le sue
+//      app, una sola identità le controlla tutte.
+//
+// Il meccanismo (`platform_add_controller`) esiste già: F2 è la *cornice* — lo
+// stato "configurato ✓ / assente ⚠" (gate per F3) e la spinta a impostarla.
+// Niente stato backend: le backup key si derivano dalla lista controller via
+// `deriveBackupKeys` (L1, tutto ciò che non è un'identità di sistema nota).
+
+/**
+ * @param {Record<string, any> | null} meta
+ * @param {{
+ *   controllers?: import('@dfinity/principal').Principal[],
+ *   appAdmin?:    import('@dfinity/principal').Principal | null,
+ *   myPrincipal?: import('@dfinity/principal').Principal | null,
+ *   canisterId:   string,
+ *   onChanged?:   () => Promise<void>,
+ * }} prefetched
+ * @returns {{ title: string, content: HTMLElement[] } | null}
+ */
+function buildBackupKeySection(meta, {
+  controllers = [],
+  mgmtError = null,
+  appAdmin = null,
+  myPrincipal = null,
+  canisterId,
+  onChanged = null,
+} = {}) {
+  const m = parseMetadata(meta);
+  if (!m || m.isStandalone) return null;
+
+  const selfP = Principal.fromText(canisterId);
+  // Una backup-key è un'identità che possiedi *altrove*: vietiamo l'aggiunta di
+  // un'identità di sistema, e in particolare di P_portal (A2 #3) — rimetterla
+  // controller riaprirebbe il vettore chiuso. Rifiuto client-side prima del round-trip.
+  const rejectBackupKey = makeBackupKeyValidator(m, {
+    appAdmin, myPrincipal, selfPrincipal: selfP,
+  });
+
+  // Senza la lista controller (canister_status fallita) non possiamo affermare
+  // "nessuna backup key" — sarebbe un falso negativo. Mostriamo l'add (sempre
+  // utile) ma non il banner ⚠, e rimandiamo l'errore alla sezione Controllers.
+  if (mgmtError) {
+    return { title: 'Backup key', content: [
+      noteEl(
+        'Add a backup key you control from elsewhere (a dfx principal, or a second ' +
+        'Internet Identity) so you can always recover this canister.'),
+      buildAddRow(canisterId, onChanged, {
+        label: 'Add a backup key (a principal you control)',
+        buttonLabel: 'Add backup key',
+        rejectPrincipal: rejectBackupKey,
+      }),
+      recoveryHelp(),
+    ] };
+  }
+
+  const backupKeys = deriveBackupKeys(m, controllers, {
+    appAdmin, myPrincipal, selfPrincipal: selfP,
+  });
+  const hasBackup = backupKeys.length > 0;
+
+  const rows = [];
+
+  if (hasBackup) {
+    rows.push(statusBanner('✓', 'You have a backup key', 'var(--success)'));
+    rows.push(noteEl(
+      'If you ever lose access to this app’s login, you can regain control of ' +
+      'your canister with the backup key below. Keep it somewhere safe — and ' +
+      'consider using the same backup key across all your EasyCan apps, so a single ' +
+      'identity controls everything.'));
+    const list = el('ul', { class: 'controllers-list' });
+    for (const k of backupKeys) {
+      list.appendChild(el('li', { class: 'ctrl-row' },
+        el('div', { class: 'ctrl-info' },
+          el('code', { class: 'ctrl-principal' }, k.toText()),
+          el('span', { class: 'ctrl-label-tag' }, 'Backup key (you)'),
+        )));
+    }
+    rows.push(list);
+    rows.push(recoveryHelp());
+    rows.push(el('hr', { class: 'settings-divider' }));
+    rows.push(buildAddRow(canisterId, onChanged, {
+      label: 'Add another backup key',
+      buttonLabel: 'Add',
+      rejectPrincipal: rejectBackupKey,
+    }));
+  } else {
+    rows.push(statusBanner('⚠', 'No backup key set', 'var(--accent-2)'));
+    rows.push(noteEl(
+      'Right now only this app’s login controls your canister. If you lose that ' +
+      'login, the canister becomes unrecoverable — there is no EasyCan recovery, ' +
+      'by design. Before relying fully on self-custody, add a backup key you control ' +
+      'from elsewhere: a dfx principal, or a second Internet Identity.'));
+    rows.push(buildAddRow(canisterId, onChanged, {
+      label: 'Add a backup key (a principal you control)',
+      buttonLabel: 'Add backup key',
+      rejectPrincipal: rejectBackupKey,
+    }));
+    rows.push(recoveryHelp());
+  }
+
+  return { title: 'Backup key', content: rows };
+}
+
+/**
+ * Costruisce un validatore "questo principal NON è una backup-key valida": ritorna
+ * un messaggio d'errore (o null se va bene). P_portal (attuale/originale) ha un
+ * messaggio dedicato — A2 (#3): rimetterlo controller riapre il vettore chiuso.
+ * Le altre identità di sistema (self, app admin, spawner) ottengono un messaggio
+ * generico. Specchia il rifiuto backend di `add_controller`.
+ *
+ * @param {ReturnType<typeof parseMetadata> | null} m
+ * @param {Parameters<typeof systemPrincipals>[1]} ctx
+ * @returns {(p: import('@dfinity/principal').Principal) => string | null}
+ */
+function makeBackupKeyValidator(m, ctx = {}) {
+  const sys = systemPrincipals(m, ctx);
+  const portalSet = new Set(
+    [m?.portalOwner, m?.originalPortalOwner].filter(Boolean).map((p) => p.toText()),
+  );
+  return (p) => {
+    const t = p.toText();
+    if (portalSet.has(t)) {
+      return 'This is your EasyCan identity, not a backup key. Re-adding it as a ' +
+        'controller would re-open the EasyCan dashboard access you turned off. Use a key ' +
+        'you control elsewhere (a dfx principal, or a second Internet Identity).';
+    }
+    if (sys.has(t)) {
+      return 'This is already a system identity of this canister, not a backup key. Add a ' +
+        'principal you control from elsewhere (a dfx principal, or a second Internet Identity).';
+    }
+    return null;
+  };
+}
+
+/** Banner di stato con icona colorata + testo. */
+function statusBanner(icon, text, color) {
+  return el('div', { class: 'settings-row', style: 'align-items: center; gap: 0.5em;' },
+    el('span', { style: `color: ${color}; font-size: 1.2em;` }, icon),
+    el('span', { class: 'settings-label', style: `color: ${color};` }, text),
+  );
+}
+
+/** Guida al recovery IC-native (collassabile): cosa fare quando il login è perso. */
+function recoveryHelp() {
+  return el('details', { class: 'settings-note small muted', style: 'margin-top: 0.5em;' },
+    el('summary', { style: 'cursor: pointer;' }, 'How to recover with your backup key'),
+    el('p', { class: 'small muted', style: 'margin-top: 0.5em;' },
+      'If you lose this app’s login you can no longer use this page (it needs the ' +
+      'admin login). Recover at the protocol level instead: with the backup key’s ' +
+      'identity, use dfx or the NNS dashboard to manage the canister as a controller — ' +
+      'e.g. top up cycles, or re-point the controllers. The backup key is a full IC ' +
+      'controller, so it has the power to recover the canister on its own.'),
+    el('p', { class: 'small muted' },
+      'Example (dfx): dfx canister --network ic update-settings ' +
+      '--add-controller <new-principal> <this-canister-id>'),
+  );
+}
+
 // ─── Controllers section (ex controllers.js) ─────────────────────────────────
 //
 // Lista i controller del canister e permette di aggiungerne/rimuoverne. I
@@ -381,32 +466,16 @@ function buildControllersSection(meta, {
   const selfP = Principal.fromText(canisterId);
   const spawnerP = m.spawner;
   const portalOwnerP = m.portalOwner;
-  const originalSpawnerP = m.originalSpawner;
-  const originalPortalOwnerP = m.originalPortalOwner;
   // Portale rimosso: aveva un'identità EasyCan (original presente) ma ora è
-  // fuori dai controller (portal_owner None). Si può riattivare la dashboard.
+  // fuori dai controller (portal_owner None). Stato permanente (A2 #3).
   const portalRemoved = sov.portalRemoved;
-  // EasyCan (spawner) è ancora controller? Vero in Managed (spawner presente) e
-  // in Emancipated+support (original_spawner ri-aggiunto). Se vero, rimuovere il
-  // portale lascia il terzo al controllo e l'utente cieco → hard-block del remove
-  // (bottone disabilitato + hint contestuale).
-  const easycanIsController = controllersInclude(controllers, originalSpawnerP);
 
   function isProtected(p) {
     const t = p.toText();
     if (t === selfP.toText()) return true;
     if (appAdmin && t === appAdmin.toText()) return true;
     if (spawnerP && t === spawnerP.toText()) return true;
-    // Support concesso (emancipated + original_spawner ri-aggiunto): EasyCan è
-    // di nuovo controller. Non rimovibile da qui — il flow ufficiale è "Revoke
-    // EasyCan support" (sezione Platform), simmetrico alla protezione dello
-    // spawner attivo in Managed. Evita la doppia via di revoca.
-    if (sov.supportGranted && originalSpawnerP && t === originalSpawnerP.toText()) return true;
     return false;
-  }
-
-  function isSupportAccess(p) {
-    return sov.supportGranted && originalSpawnerP !== null && p.toText() === originalSpawnerP.toText();
   }
 
   function isPortalOwner(p) {
@@ -418,13 +487,11 @@ function buildControllersSection(meta, {
     if (t === selfP.toText()) return 'This canister (self-management)';
     if (appAdmin && t === appAdmin.toText()) return 'Your app identity (you)';
     if (spawnerP && t === spawnerP.toText()) return 'EasyCan';
-    // Emancipated (spawner None) ma original_spawner ri-aggiunto = supporto concesso
-    if (!spawnerP && originalSpawnerP && t === originalSpawnerP.toText()) {
-      return 'EasyCan (support access)';
-    }
     if (portalOwnerP && t === portalOwnerP.toText()) return 'Your EasyCan identity';
     if (myPrincipal && t === myPrincipal.toText()) return 'Your app identity (you)';
-    return 'Other';
+    // Tutto il resto = un controller aggiunto dall'utente, ossia una backup key
+    // (un'identità che possiede altrove). Cfr. buildBackupKeySection.
+    return 'Backup key (you)';
   }
 
   const rows = [];
@@ -441,21 +508,9 @@ function buildControllersSection(meta, {
   } else {
     const list = el('ul', { class: 'controllers-list' });
     for (const ctrl of controllers) {
-      // Removing the dashboard identity (portal owner) is hard-blocked while EasyCan
-      // support is on — sovereign-by-default, EasyCan is a controller only when support
-      // is granted, so portalBlocked ⟹ support on. Turning off the dashboard then would
-      // leave a third party in control while you lose visibility. Revoke support first;
-      // once support is off the dashboard identity can be removed cleanly.
-      const portalBlocked = isPortalOwner(ctrl) && easycanIsController;
-      const hardBlockHint = !portalBlocked ? '' :
-        'EasyCan support is on, so it\'s a controller of this canister. Revoke EasyCan ' +
-        'support first (Platform section above), then you can turn off the dashboard.';
       list.appendChild(renderControllerRow(ctrl, {
         isProtected: isProtected(ctrl),
         isPortalOwner: isPortalOwner(ctrl),
-        isSupportAccess: isSupportAccess(ctrl),
-        hardBlock: portalBlocked,
-        hardBlockHint,
         label: labelFor(ctrl),
         canisterId,
         onChanged,
@@ -464,31 +519,28 @@ function buildControllersSection(meta, {
     rows.push(list);
   }
 
-  // Portale rimosso → riga di riattivazione dashboard
+  // Portale rimosso → nota informativa. La riattivazione è stata ritirata (A2 #3):
+  // P_portal non è ri-aggiungibile come controller, la rimozione è permanente.
   if (portalRemoved) {
-    rows.push(renderRestorePortalRow(originalPortalOwnerP, canisterId, onChanged));
+    rows.push(el('p', { class: 'small muted', style: 'margin-top: 0.5em;' },
+      'The EasyCan dashboard is off for this canister. Re-enabling it from here has ' +
+      'been retired: your EasyCan identity can no longer be re-added as a controller. ' +
+      'You remain the sole authority — monitor and top up cycles via the NNS dashboard, ' +
+      'or with a backup key you control.'));
   }
 
-  // Add-row
-  rows.push(el('hr', { class: 'settings-divider' }));
-  rows.push(buildAddRow(canisterId, onChanged));
-
+  // Nessuna add-row qui: aggiungere un controller = aggiungere una backup key,
+  // e quel flusso (spiegato + spinto) vive nella sezione "Backup key" sopra.
+  // Questa sezione resta la vista completa (lista + remove; la riattivazione dashboard
+  // è ritirata in A2 → solo nota informativa quando portalRemoved).
   return { title: 'Controllers', content: rows };
 }
 
-function renderControllerRow(principal, { isProtected, isPortalOwner = false, isSupportAccess = false, hardBlock = false, hardBlockHint = '', label, canisterId, onChanged = null }) {
+function renderControllerRow(principal, { isProtected, isPortalOwner = false, label, canisterId, onChanged = null }) {
   const key = principal.toText();
   const infoChildren = [];
 
-  if (isSupportAccess) {
-    infoChildren.push(el('p', { class: 'small muted ctrl-hint' },
-      'EasyCan has support access (it is a controller of this canister). ' +
-      'To remove it, use "Revoke EasyCan support" in the Platform section above.'));
-  }
-
-  if (isPortalOwner && hardBlock) {
-    infoChildren.push(el('p', { class: 'small muted ctrl-hint' }, hardBlockHint));
-  } else if (isPortalOwner) {
+  if (isPortalOwner) {
     infoChildren.push(el('p', { class: 'small muted ctrl-hint' },
       'Removing this turns off the EasyCan dashboard (cycles, status, controllers). ' +
       'You are already the sole authority over this canister — but from then on monitoring ' +
@@ -506,17 +558,7 @@ function renderControllerRow(principal, { isProtected, isPortalOwner = false, is
 
   const row = el('li', { class: 'ctrl-row' }, info);
 
-  if (isPortalOwner && hardBlock) {
-    // Hard-blocked: show a disabled Remove so the axis stays visible, but the only
-    // path is "Revoke EasyCan support" first (explained in the hint above).
-    const actions = el('div', { class: 'ctrl-actions' },
-      el('button', {
-        class: 'btn-text small',
-        disabled: true,
-        title: 'EasyCan is still a controller — see the note above',
-      }, 'Remove'));
-    row.appendChild(actions);
-  } else if (!isProtected) {
+  if (!isProtected) {
     const actions = el('div', { class: 'ctrl-actions' });
     let confirming = false;
     let busy = false;
@@ -581,56 +623,18 @@ function renderControllerRow(principal, { isProtected, isPortalOwner = false, is
   return row;
 }
 
-function renderRestorePortalRow(originalPortalOwnerP, canisterId, onChanged = null) {
-  const info = el('div', { class: 'ctrl-info' },
-    el('p', { class: 'small muted ctrl-hint' },
-      'The EasyCan dashboard is off for this canister. Re-enabling it adds your ' +
-      'EasyCan identity back as a controller, so cycles, status and controllers ' +
-      'become visible again from EasyCan — and you get notified when cycles run low. ' +
-      'This does not bring back EasyCan as a manager: it stays your dashboard only.'),
-    el('code', { class: 'ctrl-principal' }, originalPortalOwnerP.toText()),
-    el('span', { class: 'ctrl-label-tag' }, 'Your EasyCan identity (dashboard off)'),
-  );
-
-  const row = el('li', { class: 'ctrl-row ctrl-row--off' }, info);
-  const actions = el('div', { class: 'ctrl-actions' });
-  const errorBox = el('span', { class: 'ctrl-error' }, '');
-  errorBox.style.display = 'none';
-  let busy = false;
-
-  const btn = el('button', { class: 'btn-text small' }, 'Re-enable');
-  btn.onclick = async () => {
-    if (busy) return;
-    busy = true;
-    btn.disabled = true;
-    btn.textContent = 'Re-enabling…';
-    errorBox.style.display = 'none';
-    try {
-      await restorePortal(canisterId);
-      if (onChanged) await onChanged();
-      else window.location.reload();
-    } catch (err) {
-      errorBox.textContent = err?.message || String(err);
-      errorBox.style.display = '';
-      busy = false;
-      btn.disabled = false;
-      btn.textContent = 'Re-enable';
-    }
-  };
-  actions.appendChild(btn);
-  row.appendChild(actions);
-  row.appendChild(errorBox);
-  return row;
-}
-
-function buildAddRow(canisterId, onChanged = null) {
+function buildAddRow(canisterId, onChanged = null, {
+  label = 'Add a controller principal',
+  buttonLabel = 'Add',
+  rejectPrincipal = null,
+} = {}) {
   const input = el('input', {
     type: 'text',
     class: 'ctrl-add-input',
     placeholder: 'xxxxx-xxxxx-...-xxxxx-cai',
     autocomplete: 'off',
   });
-  const btn = el('button', { class: 'btn-secondary small' }, 'Add');
+  const btn = el('button', { class: 'btn-secondary small' }, buttonLabel);
   const errorBox = el('p', {
     class: 'small',
     style: 'color: var(--error); display: none; margin: 0;',
@@ -658,6 +662,10 @@ function buildAddRow(canisterId, onChanged = null) {
     if (!raw) { setError('Enter a principal'); return; }
     let p;
     try { p = Principal.fromText(raw); } catch { setError('Invalid principal format'); return; }
+    if (rejectPrincipal) {
+      const why = rejectPrincipal(p);
+      if (why) { setError(why); return; }
+    }
     busy = true;
     btn.disabled = true;
     input.disabled = true;
@@ -678,7 +686,7 @@ function buildAddRow(canisterId, onChanged = null) {
   return el(
     'div',
     { class: 'ctrl-add-row' },
-    el('label', { class: 'small muted' }, 'Add a controller principal'),
+    el('label', { class: 'small muted' }, label),
     el('div', { class: 'ctrl-add-inputs' }, input, btn),
     busyBox,
     errorBox,

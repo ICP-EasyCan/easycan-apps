@@ -13,6 +13,8 @@ import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
                                from '@shared/core/icp.js';
 import { handleDeepLinkClaim }
                                from '@shared/core/claim.js';
+import { getInstallParamsFromUrl, stashInstallParams, cleanInstallFromUrl, getPendingInstall }
+                               from '@shared/capabilities/update/handoff.js';
 import { $ }                   from '@shared/ui/dom.js';
 import { route, fallback, startRouter, navigate }
                                from '@shared/ui/router.js';
@@ -31,6 +33,7 @@ import { renderSettings }      from './app/pages/settings.js';
 import { mountSovereigntyPage } from '@shared/capabilities/sovereignty/page.js';
 import { mountVerifyPage }      from '@shared/capabilities/verify/page.js';
 import { mountUpdatePage }      from '@shared/capabilities/update/page.js';
+import { mountInstallPage }     from '@shared/capabilities/update/handoff-page.js';
 import { getPrincipal }         from '@shared/core/auth.js';
 import { clearKeyCache }        from '@shared/core/crypto.js';
 import { initTopNav, removeTopNav }
@@ -49,8 +52,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'vault-v0.1.0',
-  releaseSha256: 'da6aac325f3bff9640942ecf44f7d97bc2258eec05093fc1c65535c096f44800',
+  releaseTag: 'vault-v0.2.0',
+  releaseSha256: 'f2010e0e5ee68d752d0895cd71304d46fa9bf7e634f5a0d3517399e353d53448',
   dockerPackage: 'vault-canister',
   e2eeFrontend: true,       // il vault cifra nel frontend → caveat E2EE
 };
@@ -72,6 +75,23 @@ async function boot() {
   }
 
   const routeContainer = $('#route-container');
+
+  // Deep-link cambio-app (Arco B): atterriamo con ?install=<app>&token=<hex> dal portale.
+  // Stash + pulisci l'URL subito (sopravvive a login/relogin; back/refresh non ri-scatta).
+  // Il reinstall vero parte solo dalla pagina #install, dietro conferma esplicita.
+  const installParams = getInstallParamsFromUrl();
+  if (installParams) {
+    stashInstallParams(installParams);
+    cleanInstallFromUrl();
+    // Cambio-app = reinstall distruttivo (gemello del claim irreversibile): se esiste
+    // già una sessione II su questo origin, forziamo logout così l'utente passa per il
+    // login col banner di autorizzazione e conferma l'identità coscientemente — niente
+    // salto silenzioso a #install. I params restano in sessionStorage e l'auth:login
+    // post-relogin porta a #install. Cfr. relogin del claim (claim.js).
+    if (isAuthenticated()) {
+      await logout();
+    }
+  }
 
   let appOwnershipVerified = false;
 
@@ -101,6 +121,7 @@ async function boot() {
   route('#sovereignty',    () => requireAuth(() => mountSovereigntyPage(routeContainer, { canisterId: CANISTER_ID, myPrincipal: getPrincipal() })));
   route('#verify',         () => requireAuth(() => mountVerifyPage(routeContainer, { canisterId: CANISTER_ID, ...VERIFY })));
   route('#update',         () => requireAuth(() => mountUpdatePage(routeContainer, { canisterId: CANISTER_ID, ...UPGRADE })));
+  route('#install',        () => requireAuth(() => mountInstallPage(routeContainer, { canisterId: CANISTER_ID, repo: UPGRADE.repo })));
   fallback(                () => navigate(isAuthenticated() ? '#dashboard' : '#login'));
 
   // ─── Auth events ──────────────────────────────────────────────────────────
@@ -131,7 +152,8 @@ async function boot() {
       const isOwner = await checkOwnership(getPrincipalText());
       if (isOwner) {
         appOwnershipVerified = true;
-        navigate('#dashboard');
+        // Cambio-app pendente (Arco B): vai al ricevitore invece che alla home.
+        navigate(getPendingInstall() ? '#install' : '#dashboard');
       }
     } catch (e) {
       console.error('Claim failed:', e);
@@ -155,8 +177,12 @@ async function boot() {
     initBottomNav();
     handleDeepLinkClaim(CANISTER_ID, { source: 'boot' })
       .then(() => checkOwnership(getPrincipalText()))
-      .then(isOwner => { 
-        if (isOwner) appOwnershipVerified = true; 
+      .then(isOwner => {
+        if (isOwner) {
+          appOwnershipVerified = true;
+          // Cambio-app pendente (Arco B): apri il ricevitore.
+          if (getPendingInstall()) navigate('#install');
+        }
       })
       .catch(console.error);
   }

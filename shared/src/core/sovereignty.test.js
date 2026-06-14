@@ -14,6 +14,8 @@ import {
   controllersInclude,
   parseMetadata,
   deriveSovereignty,
+  systemPrincipals,
+  deriveBackupKeys,
 } from './sovereignty.js';
 
 // ─── Stub principal ───────────────────────────────────────────────────────────
@@ -111,30 +113,18 @@ test('standalone: mode standalone, sotto-stati derivati ma irrilevanti', () => {
   assert.equal(s.statusKnown, true);
 });
 
-test('managed: spawner controller → easycanControls true, supportGranted false', () => {
+test('managed: spawner ancora presente → mode managed', () => {
   const m = parseMetadata(raw({ ejected: false }));
   const s = deriveSovereignty(m, [SELF, ADMIN, SPAWNER, PORTAL]);
   assert.equal(s.mode, 'managed');
-  assert.equal(s.supportGranted, false); // support richiede ejected
-  assert.equal(s.easycanControls, true);
   assert.equal(s.portalRemoved, false);
 });
 
-test('emancipated puro: spawner null e non controller → tutto false', () => {
+test('emancipated: spawner null → mode emancipated (post-F4 EasyCan mai controller)', () => {
   const m = parseMetadata(raw({ ejected: true, spawner: null }));
   const s = deriveSovereignty(m, [SELF, ADMIN, PORTAL]);
   assert.equal(s.mode, 'emancipated');
-  assert.equal(s.supportGranted, false);
-  assert.equal(s.easycanControls, false);
   assert.equal(s.portalRemoved, false);
-});
-
-test('emancipated + support: original_spawner ri-aggiunto → support/controls true', () => {
-  const m = parseMetadata(raw({ ejected: true, spawner: null }));
-  const s = deriveSovereignty(m, [SELF, ADMIN, SPAWNER, PORTAL]);
-  assert.equal(s.mode, 'emancipated');
-  assert.equal(s.supportGranted, true);
-  assert.equal(s.easycanControls, true);
 });
 
 test('portalRemoved: portal_owner None ma original presente → true', () => {
@@ -155,30 +145,83 @@ test('portalRemoved: original_portal_owner mai settato → false anche se portal
   assert.equal(s.portalRemoved, false);
 });
 
-test('controllers vuoto: emancipated puro (status noto ma lista vuota)', () => {
+test('controllers vuoto: statusKnown true (lista nota ma vuota)', () => {
   const m = parseMetadata(raw({ ejected: true, spawner: null }));
   const s = deriveSovereignty(m, []);
   assert.equal(s.statusKnown, true);
-  assert.equal(s.supportGranted, false);
-  assert.equal(s.easycanControls, false);
+  assert.equal(s.mode, 'emancipated');
 });
 
-test('controllers null: status non disponibile → sotto-stati null, mode/portal noti', () => {
+test('controllers null: status non disponibile → statusKnown false, mode/portal noti', () => {
   const m = parseMetadata(raw({ ejected: true, spawner: null, portal_owner: null }));
   const s = deriveSovereignty(m, null);
   assert.equal(s.statusKnown, false);
-  assert.equal(s.supportGranted, null);
-  assert.equal(s.easycanControls, null);
   // mode e portalRemoved restano derivabili dal solo metadata.
   assert.equal(s.mode, 'emancipated');
   assert.equal(s.portalRemoved, true);
 });
 
-test('re_enroll: ejected torna false → supportGranted false anche con spawner controller', () => {
-  // Dopo re_enroll spawner è di nuovo Some e ejected false → managed, non support.
-  const m = parseMetadata(raw({ ejected: false, spawner: SPAWNER }));
-  const s = deriveSovereignty(m, [SELF, ADMIN, SPAWNER]);
-  assert.equal(s.mode, 'managed');
-  assert.equal(s.supportGranted, false);
-  assert.equal(s.easycanControls, true);
+// ─── Backup key (F2 self-install) ─────────────────────────────────────────────
+
+const BACKUP = P('backup-eeee');
+const BACKUP2 = P('backup-ffff');
+
+test('deriveBackupKeys: solo i controller non-di-sistema sono backup key', () => {
+  const m = parseMetadata(raw());
+  // controllers = self + admin + EasyCan(spawner) + portal + 1 backup utente.
+  const ctrls = [SELF, ADMIN, SPAWNER, PORTAL, BACKUP];
+  const keys = deriveBackupKeys(m, ctrls, {
+    appAdmin: ADMIN, myPrincipal: ADMIN, selfPrincipal: SELF,
+  });
+  assert.deepEqual(keys.map((k) => k.toText()), ['backup-eeee']);
+});
+
+test('deriveBackupKeys: nessuna backup key quando ci sono solo identità di sistema', () => {
+  const m = parseMetadata(raw());
+  const keys = deriveBackupKeys(m, [SELF, ADMIN, SPAWNER, PORTAL], {
+    appAdmin: ADMIN, myPrincipal: ADMIN, selfPrincipal: SELF,
+  });
+  assert.equal(keys.length, 0);
+});
+
+test('deriveBackupKeys: più backup key tutte rilevate', () => {
+  const m = parseMetadata(raw());
+  const keys = deriveBackupKeys(m, [SELF, ADMIN, BACKUP, BACKUP2], {
+    appAdmin: ADMIN, myPrincipal: ADMIN, selfPrincipal: SELF,
+  });
+  assert.deepEqual(keys.map((k) => k.toText()).sort(), ['backup-eeee', 'backup-ffff']);
+});
+
+test('deriveBackupKeys: il portale RIMOSSO (original_portal_owner) non conta come backup', () => {
+  // Post-remove-portal: portal_owner None ma original_portal_owner ancora noto.
+  const m = parseMetadata(raw({ portal_owner: null }));
+  const keys = deriveBackupKeys(m, [SELF, ADMIN, PORTAL, BACKUP], {
+    appAdmin: ADMIN, myPrincipal: ADMIN, selfPrincipal: SELF,
+  });
+  // PORTAL è ancora original_portal_owner → di sistema, non backup.
+  assert.deepEqual(keys.map((k) => k.toText()), ['backup-eeee']);
+});
+
+test('deriveBackupKeys: original_spawner (EasyCan) non è mai una backup key', () => {
+  const m = parseMetadata(raw({ ejected: true, spawner: null }));
+  // Difesa: anche se original_spawner comparisse tra i controller, resta un
+  // principal di sistema (EasyCan), mai scambiato per una backup key dell'utente.
+  const keys = deriveBackupKeys(m, [SELF, ADMIN, SPAWNER, BACKUP], {
+    appAdmin: ADMIN, myPrincipal: ADMIN, selfPrincipal: SELF,
+  });
+  assert.deepEqual(keys.map((k) => k.toText()), ['backup-eeee']);
+});
+
+test('deriveBackupKeys: meta null → nessuna backup key (degrada pulito)', () => {
+  assert.deepEqual(deriveBackupKeys(null, [SELF, BACKUP], {}), []);
+});
+
+test('systemPrincipals: include self/admin/spawner/portal attuali e originali', () => {
+  const m = parseMetadata(raw());
+  const sys = systemPrincipals(m, { appAdmin: ADMIN, myPrincipal: ADMIN, selfPrincipal: SELF });
+  assert.equal(sys.has('self-dddd'), true);
+  assert.equal(sys.has('admin-cccc'), true);
+  assert.equal(sys.has('spawner-aaaa'), true);
+  assert.equal(sys.has('portal-bbbb'), true);
+  assert.equal(sys.has('backup-eeee'), false);
 });

@@ -2,8 +2,8 @@
  * sovereignty.js — L1: modello di stato puro della sovranità (no DOM, no rete).
  *
  * L'UNICO posto che codifica il modello binario sovrano-di-default e i suoi
- * sotto-stati (support on/off, portale rimosso, controllo EasyCan). Riusato da vault,
- * future app marketplace e (per la parte pura) dal portale.
+ * sotto-stati (portale rimosso). Riusato da vault, future app marketplace e (per
+ * la parte pura) dal portale.
  *
  * Frugalità cicli garantita per costruzione: queste funzioni NON fanno alcuna
  * chiamata IC. Ricevono `(meta, controllers)` già fetchati dal chiamante, che
@@ -73,14 +73,13 @@ export function parseMetadata(rawMeta) {
 }
 
 /**
- * Deriva lo stato di sovranità dal metadata normalizzato + lista controller live.
+ * Deriva lo stato di sovranità dal metadata normalizzato.
  *
- * `mode` e `portalRemoved` dipendono solo dal metadata (sempre noti). I sotto-stati
- * che dipendono dalla lista controller (`supportGranted`, `easycanControls`)
- * richiedono `canister_status`: se questa fallisce, il chiamante passa
- * `controllers = null` e tali campi diventano `null` (sconosciuto), NON `false`.
- * `statusKnown` distingue "status non disponibile" da "emancipated puro" (evita
- * la degradazione silenziosa: badge che spariscono invece di restare ignoti).
+ * `mode` e `portalRemoved` dipendono solo dal metadata (sempre noti). Post-F4
+ * l'asse "support" è ritirato (EasyCan non è più ri-aggiungibile come controller:
+ * `cap-platform::add_controller` lo rifiuta), quindi non c'è più alcuno stato
+ * derivato dalla lista controller. `statusKnown` resta solo per segnalare se la
+ * lista controller era disponibile (utile ai chiamanti che la mostrano altrove).
  *
  * @param {ReturnType<typeof parseMetadata>} meta  metadata normalizzato
  * @param {import('@dfinity/principal').Principal[] | null} controllers
@@ -88,9 +87,7 @@ export function parseMetadata(rawMeta) {
  * @returns {{
  *   mode: 'standalone' | 'managed' | 'emancipated',
  *   statusKnown: boolean,
- *   supportGranted: boolean | null,
  *   portalRemoved: boolean,
- *   easycanControls: boolean | null,
  * } | null}  null se `meta` è assente
  */
 export function deriveSovereignty(meta, controllers) {
@@ -106,15 +103,52 @@ export function deriveSovereignty(meta, controllers) {
 
   const portalRemoved = meta.portalOwner == null && meta.originalPortalOwner != null;
 
-  if (!statusKnown) {
-    return { mode, statusKnown: false, supportGranted: null, portalRemoved, easycanControls: null };
+  return { mode, statusKnown, portalRemoved };
+}
+
+// ─── Backup key (F2 self-install) ─────────────────────────────────────────────
+//
+// Una "backup key" è un controller IC aggiunto dall'utente: un'identità che
+// possiede ALTROVE (un principal dfx, una seconda Internet Identity), tenuta per
+// recovery (riprendere il canister se perde il login dell'app) e come
+// cruscotto-unico sovrano (la stessa key su tutte le sue app). Si deriva dalla
+// lista controller: tutto ciò che NON è un'identità di sistema nota.
+
+/**
+ * Principal "di sistema" tra i controller (NON backup key dell'utente): il
+ * canister stesso, l'app identity (admin), EasyCan (spawner attuale/originale) e
+ * la dashboard EasyCan (portal owner attuale/originale).
+ *
+ * @param {ReturnType<typeof parseMetadata> | null} meta
+ * @param {{
+ *   appAdmin?: { toText(): string } | null,
+ *   myPrincipal?: { toText(): string } | null,
+ *   selfPrincipal?: { toText(): string } | null,
+ * }} [ctx]
+ * @returns {Set<string>} insieme dei principal-text di sistema
+ */
+export function systemPrincipals(meta, { appAdmin = null, myPrincipal = null, selfPrincipal = null } = {}) {
+  const set = new Set();
+  for (const p of [
+    selfPrincipal, appAdmin, myPrincipal,
+    meta?.spawner, meta?.originalSpawner,
+    meta?.portalOwner, meta?.originalPortalOwner,
+  ]) {
+    if (p) set.add(p.toText());
   }
+  return set;
+}
 
-  const supportGranted = mode === 'emancipated'
-    && controllersInclude(controllers, meta.originalSpawner);
-
-  const easycanControls = controllersInclude(controllers, meta.spawner)
-    || controllersInclude(controllers, meta.originalSpawner);
-
-  return { mode, statusKnown: true, supportGranted, portalRemoved, easycanControls };
+/**
+ * Backup key dell'utente = i controller che non sono identità di sistema.
+ *
+ * @param {ReturnType<typeof parseMetadata> | null} meta
+ * @param {Array<{ toText(): string }>} controllers  lista controller live
+ * @param {Parameters<typeof systemPrincipals>[1]} [ctx]
+ * @returns {Array<{ toText(): string }>} sottoinsieme di `controllers`
+ */
+export function deriveBackupKeys(meta, controllers, ctx = {}) {
+  if (!meta) return [];
+  const sys = systemPrincipals(meta, ctx);
+  return (controllers || []).filter((c) => !sys.has(c.toText()));
 }

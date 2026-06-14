@@ -145,7 +145,7 @@ async function readModuleHash(canisterId) {
  * l'override è inerte (zero rischio sul trust-root: un manifest ostile sceglierebbe pure il
  * wasm_sha256, aggirando la verifica). Cfr. [[dev_hatch_is_local_not_vite_dev]].
  */
-function resolveManifestUrl(repo, app, distBranch = 'dist') {
+export function resolveManifestUrl(repo, app, distBranch = 'dist') {
   const defaultUrl = repo && app
     ? `https://raw.githubusercontent.com/${repo}/${distBranch}/${app}/manifest.json`
     : null;

@@ -45,12 +45,23 @@ const CONTENT_TYPES = {
 const ASSET_BATCH_BYTES = 1_500_000; // soglia per batch upload_asset_batch (< limite ingress)
 
 /**
- * Esegue il flusso di upgrade completo. Non lancia: ritorna un esito strutturato così
- * che la UI possa offrire il rollback con lo snapshot già preso.
+ * Esegue il flusso completo di install-da-chunk. Non lancia: ritorna un esito
+ * strutturato così che la UI possa offrire il rollback con lo snapshot già preso.
+ *
+ * Due modi (`mode`):
+ *   - `'upgrade'` (default, self-upgrade §B): stessa app, versione nuova; la stable
+ *     memory è preservata via pre/post_upgrade.
+ *   - `'reinstall'` (Arco B, cambio-app L2): app DIVERSA sopra quella corrente; la
+ *     stable memory è AZZERATA (dati dell'app uscente persi, semantica onesta L2).
+ *     Lo snapshot del passo 3 cattura comunque l'app uscente → rollback possibile se
+ *     l'install di B si rompe a metà.
  *
  * @param {{
  *   canisterId: string,
  *   manifest: object,            // contratto release: wasm_url, wasm_sha256, frontend_url, frontend_sha256, version
+ *   mode?: 'upgrade'|'reinstall',
+ *   onChainSha256?: string|null, // hex SHA-256 on-chain (factory get_wasm_sha256) — anchor anti-manifest-manomesso (Arco B)
+ *   healthPing?: string|null,    // metodo query "vivo" post-install; null = solo app_version (app generica)
  *   onProgress?: (step: string, detail?: string) => void,
  * }} opts
  * Il campo `phase` dice DOVE si è fermato il flusso: la UI lo usa per decidere
@@ -60,11 +71,27 @@ const ASSET_BATCH_BYTES = 1_500_000; // soglia per batch upload_asset_batch (< l
  *
  * @returns {Promise<{ ok: boolean, phase: string, snapshotId: Uint8Array|null, error?: string }>}
  */
-export async function runUpgrade({ canisterId, manifest, onProgress = () => {} }) {
+export async function runUpgrade({
+  canisterId, manifest, mode = 'upgrade', onChainSha256 = null,
+  healthPing = 'get_user_principal', onProgress = () => {},
+}) {
   let snapshotId = null;
   let stopped = false;
   let phase = 'fetch-wasm';
   try {
+    // ── Anchor on-chain (Arco B): il SHA-256 del manifest (non fidato) DEVE combaciare
+    // con l'hash che la factory pubblica on-chain. Un manifest GitHub manomesso può
+    // così solo far FALLIRE l'install, mai sostituire il codice. Gate prima di toccare
+    // la rete: se non combaciano, non scarichiamo nemmeno.
+    if (onChainSha256 != null) {
+      const want = String(onChainSha256).trim().toLowerCase();
+      const got = String(manifest.wasm_sha256 || '').trim().toLowerCase();
+      if (!want || want !== got) {
+        throw new Error(
+          `Manifest hash does not match the on-chain record — refusing to install ` +
+          `(on-chain ${want || 'n/d'}, manifest ${got || 'n/d'}).`);
+      }
+    }
     // ── Passo 1: WASM verificato ───────────────────────────────────────────────
     onProgress('fetch-wasm', 'Downloading the new version…');
     const wasm = await fetchVerified(manifest.wasm_url, manifest.wasm_sha256, 'WASM');
@@ -89,10 +116,10 @@ export async function runUpgrade({ canisterId, manifest, onProgress = () => {} }
     const snap = await takeSnapshot(canisterId);
     snapshotId = snap.id;
 
-    // ── Passo 4: install (mode=upgrade) + start ─────────────────────────────────
+    // ── Passo 4: install (mode=upgrade|reinstall) + start ───────────────────────
     phase = 'install';
-    onProgress('install', 'Installing the new version…');
-    await installChunkedCode(canisterId, chunkHashes, hexToBytes(manifest.wasm_sha256));
+    onProgress('install', mode === 'reinstall' ? 'Installing the app…' : 'Installing the new version…');
+    await installChunkedCode(canisterId, chunkHashes, hexToBytes(manifest.wasm_sha256), mode);
     await startCanister(canisterId);
     stopped = false;
 
@@ -107,8 +134,8 @@ export async function runUpgrade({ canisterId, manifest, onProgress = () => {} }
 
     // ── Passo 6: health-check ───────────────────────────────────────────────────
     phase = 'health';
-    onProgress('health', 'Verifying the upgrade…');
-    await healthCheck(canisterId, manifest.version);
+    onProgress('health', mode === 'reinstall' ? 'Verifying the new app…' : 'Verifying the upgrade…');
+    await healthCheck(canisterId, manifest.version, healthPing);
 
     phase = 'done';
     onProgress('done', 'Update complete.');
@@ -120,6 +147,25 @@ export async function runUpgrade({ canisterId, manifest, onProgress = () => {} }
     }
     return { ok: false, phase, snapshotId, error: e?.message || String(e) };
   }
+}
+
+/**
+ * Arco B — cambio-app L2: installa l'app B (manifest) sopra l'app corrente, AZZERANDO
+ * la stable memory (dati persi, semantica onesta L2). Wrapper sottile di `runUpgrade`
+ * con `mode='reinstall'`. Il ricevitore di handoff in-app (B2) lo invoca dopo aver
+ * risolto il manifest di B (GitHub) e l'anchor SHA-256 on-chain (factory get_wasm_sha256).
+ *
+ * @param {{
+ *   canisterId: string,
+ *   manifest: object,            // manifest di B: wasm_url, wasm_sha256, frontend_url, frontend_sha256, version
+ *   onChainSha256: string,       // hex SHA-256 da factory.get_wasm_sha256() — anchor anti-manifest-manomesso
+ *   healthPing?: string|null,    // metodo query "vivo" di B (default null: solo app_version)
+ *   onProgress?: (step: string, detail?: string) => void,
+ * }} opts
+ * @returns {Promise<{ ok: boolean, phase: string, snapshotId: Uint8Array|null, error?: string }>}
+ */
+export function runReinstall({ canisterId, manifest, onChainSha256, healthPing = null, onProgress = () => {} }) {
+  return runUpgrade({ canisterId, manifest, mode: 'reinstall', onChainSha256, healthPing, onProgress });
 }
 
 /**
@@ -249,15 +295,16 @@ function contentTypeFor(path) {
 
 // ─── Health-check post-upgrade ──────────────────────────────────────────────────
 
-async function healthCheck(canisterId, expectedVersion) {
+async function healthCheck(canisterId, expectedVersion, healthPing = 'get_user_principal') {
   // app_version() deve rispondere e combaciare col manifest.
   const v = await query(canisterId, 'app_version');
   if (typeof v !== 'string') throw new Error('Health-check failed: app_version() did not respond.');
   if (expectedVersion && stripV(v) !== stripV(expectedVersion)) {
     throw new Error(`Health-check failed: running v${v}, expected v${expectedVersion}.`);
   }
-  // Ping a un metodo base: il canister risponde alle query → vivo.
-  await query(canisterId, 'get_user_principal');
+  // Ping a un metodo base: il canister risponde alle query → vivo. Su reinstall di
+  // un'app generica B il metodo varia → il chiamante lo passa (o null per saltarlo).
+  if (healthPing) await query(canisterId, healthPing);
 }
 
 function stripV(v) {

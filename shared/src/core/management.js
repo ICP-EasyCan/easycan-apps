@@ -262,19 +262,28 @@ export async function loadSnapshot(canisterIdText, snapshotId) {
 }
 
 /**
- * Installa il WASM dai chunk caricati, mode=upgrade (preserva la stable memory via
- * pre/post_upgrade). La replica valida che l'hash assemblato == wasm_module_hash.
+ * Installa il WASM dai chunk caricati. La replica valida che l'hash assemblato ==
+ * wasm_module_hash. Due modi:
+ *   - `'upgrade'` (default, self-upgrade §B): preserva la stable memory via
+ *     pre/post_upgrade — stessa app, versione nuova.
+ *   - `'reinstall'` (Arco B, cambio-app L2): AZZERA la stable memory — installa
+ *     un'app DIVERSA sopra quella corrente, i dati dell'app uscente si perdono
+ *     (semantica onesta L2). Gemello dell'upgrade ma con `mode={reinstall:null}`.
  * @param {string} canisterIdText
  * @param {Uint8Array[]} chunkHashes — hash dei chunk in ordine (da uploadChunk)
  * @param {Uint8Array} wasmModuleHash — = manifest.wasm_sha256 (hex→bytes), prova on-chain
+ * @param {'upgrade'|'reinstall'} [mode='upgrade']
  */
-export async function installChunkedCode(canisterIdText, chunkHashes, wasmModuleHash) {
+export async function installChunkedCode(canisterIdText, chunkHashes, wasmModuleHash, mode = 'upgrade') {
   const target = Principal.fromText(canisterIdText);
   const mgmt = await getManagement(target);
+  // `upgrade` è una variante Opt(Record) → `[]` = None (default upgrade); `reinstall`
+  // è I.Null → `null`. Passare la forma sbagliata fa fallire la decodifica Candid.
+  const installMode = mode === 'reinstall' ? { reinstall: null } : { upgrade: [] };
   await mgmt.install_chunked_code({
-    arg: new Uint8Array(),                       // gli upgrade delle app non prendono arg
+    arg: new Uint8Array(),                       // né upgrade né reinstall delle app prendono arg
     wasm_module_hash: wasmModuleHash,
-    mode: { upgrade: [] },                        // Opt None → upgrade di default
+    mode: installMode,
     chunk_hashes_list: chunkHashes.map((hash) => ({ hash })),
     target_canister: target,
     store_canister: [],                           // None → lo store è il target stesso

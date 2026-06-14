@@ -15,7 +15,7 @@ use cap_crypto::DerivationContext;
 use core_assets::{HttpRequest, HttpResponse};
 
 #[cfg(feature = "platform")]
-use cap_platform::AppMetadata;
+use cap_platform::{AppMetadata, Status};
 
 // ─── MemoryManager ──────────────────────────────────────────────────────────
 
@@ -254,11 +254,9 @@ async fn platform_remove_portal() -> Result<(), String> {
     cap_platform::remove_portal_controller(caller()).await
 }
 
-#[cfg(feature = "platform")]
-#[ic_cdk::update]
-async fn platform_restore_portal() -> Result<(), String> {
-    cap_platform::restore_portal_controller(caller()).await
-}
+// platform_restore_portal RIMOSSO in A2 (#3): P_portal non e' ri-aggiungibile
+// come controller (vedi cap_platform::add_controller). La rimozione del portale
+// e' permanente per costruzione.
 
 #[cfg(feature = "platform")]
 #[ic_cdk::query]
@@ -279,6 +277,30 @@ fn platform_metadata() -> AppMetadata {
 }
 
 #[cfg(feature = "platform")]
+#[ic_cdk::query]
+fn platform_cycles() -> candid::Nat {
+    cap_platform::cycles()
+}
+
+#[cfg(feature = "platform")]
+#[ic_cdk::update]
+async fn platform_status() -> Result<Status, String> {
+    cap_platform::status(caller()).await
+}
+
+#[cfg(feature = "platform")]
+#[ic_cdk::update]
+fn platform_set_status_viewers(viewers: Vec<Principal>) -> Result<(), String> {
+    cap_platform::set_status_viewers(caller(), viewers)
+}
+
+#[cfg(feature = "platform")]
+#[ic_cdk::update]
+fn platform_set_private_ops(on: bool) -> Result<(), String> {
+    cap_platform::set_private_ops(caller(), on)
+}
+
+#[cfg(feature = "platform")]
 #[ic_cdk::update]
 fn platform_set_tier(tier: u8, expires_ns: Option<u64>) -> Result<(), String> {
     cap_platform::set_tier(caller(), tier, expires_ns)
@@ -288,12 +310,6 @@ fn platform_set_tier(tier: u8, expires_ns: Option<u64>) -> Result<(), String> {
 #[ic_cdk::query]
 fn platform_get_tier() -> u8 {
     cap_platform::get_tier()
-}
-
-#[cfg(feature = "platform")]
-#[ic_cdk::update]
-async fn platform_re_enroll(new_spawner: Principal) -> Result<(), String> {
-    cap_platform::re_enroll(caller(), new_spawner).await
 }
 
 #[cfg(feature = "platform")]
