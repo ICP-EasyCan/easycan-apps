@@ -12,7 +12,7 @@ import { initAuth, login, logout, isAuthenticated, getPrincipalText, getPrincipa
                                from '@shared/core/auth.js';
 import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
                                from '@shared/core/icp.js';
-import { handleDeepLinkClaim }
+import { handleDeepLinkClaim, isClaimPending }
                                from '@shared/core/claim.js';
 import { getInstallParamsFromUrl, stashInstallParams, cleanInstallFromUrl, getPendingInstall }
                                from '@shared/capabilities/update/handoff.js';
@@ -118,11 +118,18 @@ async function boot() {
   bus.on('auth:login', async ({ principal }) => {
     const loginCard = document.querySelector('.login-card');
     if (loginCard) {
+      // Testo onesto: "registro la proprietà" solo se un claim sta davvero per
+      // partire (acquisto fresh). Al re-login o dopo un reinstall l'owner è già
+      // settato (cap-platform adopt_sovereign) → si VERIFICA soltanto.
+      const claiming = isClaimPending();
+      const title    = claiming ? 'Configuring App' : 'Signing in';
+      const detail   = claiming ? 'Registering your ownership on the blockchain...'
+                                : 'Verifying your ownership...';
       loginCard.innerHTML = `
         <div style="padding: 40px 20px; text-align: center; animation: fadeIn 0.4s ease-out;">
           <div style="display: inline-block; width: 28px; height: 28px; border: 3px solid rgba(13, 148, 136, 0.15); border-top-color: var(--color-primary, #0d9488); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
-          <h3 style="margin: 0 0 10px 0; font-weight: 600; font-size: 1.15em; color: var(--color-text);">Configuring App</h3>
-          <p style="margin: 0; font-size: 0.95em; opacity: 0.7; color: var(--color-text);">Registering your ownership on the blockchain...</p>
+          <h3 style="margin: 0 0 10px 0; font-weight: 600; font-size: 1.15em; color: var(--color-text);">${title}</h3>
+          <p style="margin: 0; font-size: 0.95em; opacity: 0.7; color: var(--color-text);">${detail}</p>
         </div>
         <style>
           @keyframes spin { to { transform: rotate(360deg); } }

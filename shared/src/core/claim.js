@@ -67,6 +67,18 @@ function toHex(bytes) {
 }
 
 /**
+ * Vero solo se un claim sta DAVVERO per avvenire: token `?claim=` nell'URL o
+ * token pendente in sessionStorage (ripresa dopo logout forzato). Serve alla UI
+ * per distinguere "sto registrando la proprietà" (acquisto fresh) dal semplice
+ * "sto verificando la proprietà" (re-login, post-reinstall): dopo un reinstall
+ * l'owner è già settato all'init (cap-platform adopt_sovereign) → nessun claim.
+ * @returns {boolean}
+ */
+export function isClaimPending() {
+  return getClaimTokenFromUrl() !== null || getPendingTokenFromStorage() !== null;
+}
+
+/**
  * Remove the ?claim= parameter from the URL without reloading.
  */
 function cleanClaimFromUrl() {
