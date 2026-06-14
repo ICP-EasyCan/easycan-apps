@@ -53,7 +53,7 @@ setDefaultIdlFactory(idlFactory);
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
   releaseTag: 'messenger-v0.2.0',
-  releaseSha256: '90adc3f87d8970108ad2fbda017fbd41885b9cacb5a4742e6342c634e0076b3b',
+  releaseSha256: '1bcb539464c5acd5e0a25b5215717c8fa46f929fc3c9604803e440647b9c0c22',
   dockerPackage: 'messenger-canister',
   e2eeFrontend: false,      // messenger NON è E2EE
 };
