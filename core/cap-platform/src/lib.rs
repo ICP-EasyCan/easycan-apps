@@ -187,6 +187,43 @@ fn save_state(state: &PlatformState) {
 
 // ─── Setup piattaforma (chiamato da init del canister host) ─────────────────
 
+/// Setup piattaforma all'init dell'app, **caller-keyed**.
+///
+/// Due percorsi, distinti dal caller dell'install (chi ha installato il WASM):
+/// - **PROVISION** (`caller == factory`): la factory installa in provisioning
+///   (`app_factory` encoda `(spawner, factory)`, caller = factory_self). Lo spawner
+///   diventa owner temporaneo fino al claim → flusso claim INVARIATO.
+/// - **CAMBIO-APP SOVRANO** (`caller != factory`): post-claim ne' spawner ne' factory
+///   sono controller, quindi solo P_app_frontend puo' chiamare `install_chunked_code`
+///   (mode=reinstall). L'app adotta direttamente il caller come owner sovrano:
+///   nessuna finestra spawner-owner, nessun re-claim.
+///
+/// Firma init dell'app INVARIATA `(spawner, factory)`: il discriminante e' il caller,
+/// non un nuovo argomento → contratto cap-platform / `.did` / app_factory encode intatti.
+pub fn init_platform(spawner: Principal, factory: Principal, caller: Principal) {
+    if caller == factory {
+        set_spawner(spawner, factory);
+    } else {
+        adopt_sovereign(spawner, factory, caller);
+    }
+}
+
+/// Adozione sovrana nel cambio-app: il caller (P_app_frontend) diventa owner pieno
+/// senza la finestra spawner-owner e senza re-claim. Registra comunque spawner/factory
+/// (origine marketplace, abilita il lock F4) ma NON fa `set_owner(spawner)`.
+fn adopt_sovereign(spawner: Principal, factory: Principal, owner: Principal) {
+    let mut state = get_state();
+    state.spawner = Some(spawner);
+    state.factory_id = Some(factory);
+    if state.original_spawner.is_none() {
+        state.original_spawner = Some(spawner);
+    }
+    state.admin = Some(owner);
+    save_state(&state);
+    core_auth::set_owner(owner);
+    core_auth::set_user_principal(owner);
+}
+
 /// Registra spawner e factory. Chiamato dal canister host in `init(spawner, factory)`
 /// quando l'app viene deployata dalla piattaforma SaaS.
 ///
@@ -927,6 +964,32 @@ mod tests {
         assert_eq!(get_state().original_spawner, Some(spawner));
         // Spawner diventa owner temporaneo (fino al claim)
         assert_eq!(core_auth::owner(), spawner);
+    }
+
+    #[test]
+    fn init_platform_provision_caller_is_factory() {
+        setup();
+        let (spawner, factory) = (p(10), p(20));
+        init_platform(spawner, factory, factory); // caller == factory → provision
+        assert_eq!(core_auth::owner(), spawner, "provision: spawner owner temp");
+        assert!(get_admin().is_none(), "provision: admin solo dopo claim");
+        assert_eq!(get_state().original_spawner, Some(spawner));
+    }
+
+    #[test]
+    fn init_platform_change_app_sovereign() {
+        setup();
+        let (spawner, factory, p_app) = (p(10), p(20), p(30));
+        init_platform(spawner, factory, p_app); // caller != factory → sovrano
+        assert_eq!(core_auth::owner(), p_app, "cambio-app: caller owner diretto");
+        assert_eq!(core_auth::user_principal(), Some(p_app));
+        assert_eq!(get_admin(), Some(p_app), "sovrano subito, niente re-claim");
+        assert_eq!(
+            get_state().original_spawner,
+            Some(spawner),
+            "origine marketplace registrata"
+        );
+        // niente finestra spawner: lo spawner non e' mai stato owner
     }
 
     #[test]

@@ -15,14 +15,16 @@
  * spawner, non dal parametro URL spoofabile). Integrità del codice = àncora SHA-256
  * on-chain (factory `get_wasm_sha256`, B0-slice) confrontata col manifest PRIMA del fetch.
  *
- * Pipeline (passi read-only idempotenti PRIMA, consume+reinstall distruttivo DOPO):
+ * Pipeline (passi read-only idempotenti PRIMA, reinstall distruttivo + commit DOPO):
  *   1. risolvi lo spawner del proprio canister via `platform_metadata`
  *   2. spawner `get_app_info(app)` → factory_canister_id
  *   3. factory `get_wasm_sha256()` → àncora SHA-256 (hex)
  *   4. risolvi + scarica il manifest della release (GitHub `dist`)
- *   5. spawner `consume_install_token(token, self)` → app_id autentico (brucia il token)
- *      + verifica che combaci con quello in URL
+ *   5. spawner `peek_install_token(token, self)` → app_id autentico (read-only, NON
+ *      brucia) + verifica che combaci con quello in URL
  *   6. `runReinstall` (anchor-gated; WIPE + install + swap frontend), firma P_app_frontend
+ *   7. solo a reinstall riuscito: spawner `consume_install_token` (commit: brucia il
+ *      token one-time + sposta l'occupancy A→B). Su fallimento niente burn/move → ritento.
  */
 
 import { Principal } from '@dfinity/principal';
@@ -191,29 +193,41 @@ export async function runHandoffInstall({ canisterId, repo, distBranch = 'dist',
     const pf = (preflight && preflight.ok) ? preflight : await preflightHandoff({ canisterId, repo, distBranch });
     if (!pf.ok) throw new Error(pf.error || 'Could not verify the release.');
 
-    // ── Gate hash PRIMA del consume: niente burn / niente spostamento occupancy se
-    //    il release non può installarsi (lo stesso check si ripete dentro runReinstall,
-    //    difesa in profondità sul path distruttivo). ───────────────────────────────
+    // ── Gate hash PRIMA del reinstall: se il release non può installarsi, fermati
+    //    qui (lo stesso check si ripete dentro runReinstall, difesa in profondità). ──
     if (!pf.hashMatches) {
       throw new Error(
         `Manifest hash does not match the on-chain record — refusing to install ` +
         `(on-chain ${pf.onChainSha256 || 'n/d'}, manifest ${pf.manifestSha256 || 'n/d'}).`);
     }
 
-    // ── Consume one-time (brucia il token; verifica l'app_id autentico) — solo oltre il gate.
-    onProgress('resolve', 'Authorizing the change…');
+    // ── PEEK read-only: app_id autentico, NIENTE burn / NIENTE spostamento occupancy.
+    //    Aborta presto su token invalido/scaduto → mai un wipe distruttivo su un token
+    //    già morto, e verifica che combaci con quello in URL. ───────────────────────
+    onProgress('resolve', 'Verifying the change…');
     const spawner = await getActorFor(pf.spawnerId, spawnerHandoffIdl);
     const tokenBytes = hexToBytes(pending.tokenHex);
-    const consumed = await spawner.consume_install_token(Array.from(tokenBytes), Principal.fromText(canisterId));
-    clearPendingInstall(); // bruciato lato-server: niente handle stantio
-    if (consumed?.Err) throw new Error(consumed.Err);
-    const authenticAppId = consumed.Ok;
+    const peeked = await spawner.peek_install_token(Array.from(tokenBytes), Principal.fromText(canisterId));
+    if (peeked?.Err) throw new Error(peeked.Err);
+    const authenticAppId = peeked.Ok;
     if (authenticAppId !== urlAppId) {
       throw new Error(`Install request mismatch (link says "${urlAppId}", token authorizes "${authenticAppId}").`);
     }
 
     // ── Reinstall distruttivo (L2) — anchor-gated di nuovo dentro runReinstall ─────────
-    const result = await runReinstall({ canisterId, manifest: pf.manifest, onChainSha256: pf.onChainSha256, healthPing: null, onProgress });
+    const result = await runReinstall({ canisterId, manifest: pf.manifest, onChainSha256: pf.onChainSha256, spawnerId: pf.spawnerId, factoryId: pf.factoryId, healthPing: null, onProgress });
+
+    // ── COMMIT solo a reinstall riuscito: brucia il token one-time + sposta l'occupancy
+    //    A→B. Su fallimento NON committiamo → token intatto, occupancy invariata,
+    //    dashboard coerente, l'utente può ri-tentare. ────────────────────────────────
+    if (result.ok) {
+      const committed = await spawner.consume_install_token(Array.from(tokenBytes), Principal.fromText(canisterId));
+      if (committed?.Err) {
+        // App installata e sovrana, ma lo spostamento seat/nome è fallito: lo segnaliamo.
+        return { ...result, appId: authenticAppId, warning: committed.Err };
+      }
+      clearPendingInstall(); // bruciato lato-server: niente handle stantio
+    }
     return { ...result, appId: authenticAppId };
   } catch (e) {
     return { ok: false, phase: 'handoff', appId: urlAppId, error: e?.message || String(e) };

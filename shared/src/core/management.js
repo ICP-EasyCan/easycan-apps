@@ -11,6 +11,7 @@
 
 import { Actor, HttpAgent, CanisterStatus } from '@dfinity/agent';
 import { Principal } from '@dfinity/principal';
+import { IDL } from '@dfinity/candid';
 import { IC_HOST, IS_LOCAL } from './config.js';
 import { getIdentity } from './auth.js';
 
@@ -273,15 +274,32 @@ export async function loadSnapshot(canisterIdText, snapshotId) {
  * @param {Uint8Array[]} chunkHashes — hash dei chunk in ordine (da uploadChunk)
  * @param {Uint8Array} wasmModuleHash — = manifest.wasm_sha256 (hex→bytes), prova on-chain
  * @param {'upgrade'|'reinstall'} [mode='upgrade']
+ * @param {{spawnerId: string, factoryId: string}|null} [platformInit=null] — per
+ *   mode='reinstall': l'init dell'app (feature platform) vuole (spawner, factory).
+ *   Ignorato per 'upgrade' (post_upgrade zero-arg).
  */
-export async function installChunkedCode(canisterIdText, chunkHashes, wasmModuleHash, mode = 'upgrade') {
+export async function installChunkedCode(canisterIdText, chunkHashes, wasmModuleHash, mode = 'upgrade', platformInit = null) {
   const target = Principal.fromText(canisterIdText);
   const mgmt = await getManagement(target);
   // `upgrade` è una variante Opt(Record) → `[]` = None (default upgrade); `reinstall`
   // è I.Null → `null`. Passare la forma sbagliata fa fallire la decodifica Candid.
   const installMode = mode === 'reinstall' ? { reinstall: null } : { upgrade: [] };
+  // L'arg dell'init dipende dal mode: upgrade → post_upgrade() zero-arg (vuoto);
+  // reinstall → esegue init(spawner, factory) (app feature platform) → va encodato,
+  // o Candid trappa "Cannot parse header" (BUG-13). cap-platform branca poi sul
+  // caller (P_app_frontend ≠ factory → adozione sovrana, niente finestra spawner).
+  let arg = new Uint8Array();
+  if (mode === 'reinstall') {
+    if (!platformInit?.spawnerId || !platformInit?.factoryId) {
+      throw new Error('installChunkedCode(reinstall): mancano spawnerId/factoryId per l\'init dell\'app');
+    }
+    arg = new Uint8Array(IDL.encode(
+      [IDL.Principal, IDL.Principal],
+      [Principal.fromText(platformInit.spawnerId), Principal.fromText(platformInit.factoryId)],
+    ));
+  }
   await mgmt.install_chunked_code({
-    arg: new Uint8Array(),                       // né upgrade né reinstall delle app prendono arg
+    arg,
     wasm_module_hash: wasmModuleHash,
     mode: installMode,
     chunk_hashes_list: chunkHashes.map((hash) => ({ hash })),

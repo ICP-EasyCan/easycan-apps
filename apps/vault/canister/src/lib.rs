@@ -42,7 +42,7 @@ fn init(owner: Principal) {
 #[ic_cdk::init]
 fn init(spawner: Principal, factory: Principal) {
     init_all_storage();
-    cap_platform::set_spawner(spawner, factory);
+    cap_platform::init_platform(spawner, factory, ic_cdk::api::msg_caller());
     core_assets::rebuild_cert_tree();
 }
 

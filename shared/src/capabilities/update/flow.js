@@ -72,7 +72,7 @@ const ASSET_BATCH_BYTES = 1_500_000; // soglia per batch upload_asset_batch (< l
  * @returns {Promise<{ ok: boolean, phase: string, snapshotId: Uint8Array|null, error?: string }>}
  */
 export async function runUpgrade({
-  canisterId, manifest, mode = 'upgrade', onChainSha256 = null,
+  canisterId, manifest, mode = 'upgrade', onChainSha256 = null, platformInit = null,
   healthPing = 'get_user_principal', onProgress = () => {},
 }) {
   let snapshotId = null;
@@ -119,7 +119,7 @@ export async function runUpgrade({
     // ── Passo 4: install (mode=upgrade|reinstall) + start ───────────────────────
     phase = 'install';
     onProgress('install', mode === 'reinstall' ? 'Installing the app…' : 'Installing the new version…');
-    await installChunkedCode(canisterId, chunkHashes, hexToBytes(manifest.wasm_sha256), mode);
+    await installChunkedCode(canisterId, chunkHashes, hexToBytes(manifest.wasm_sha256), mode, platformInit);
     await startCanister(canisterId);
     stopped = false;
 
@@ -159,13 +159,15 @@ export async function runUpgrade({
  *   canisterId: string,
  *   manifest: object,            // manifest di B: wasm_url, wasm_sha256, frontend_url, frontend_sha256, version
  *   onChainSha256: string,       // hex SHA-256 da factory.get_wasm_sha256() — anchor anti-manifest-manomesso
+ *   spawnerId: string,           // P_spawner — init-arg dell'app B (feature platform)
+ *   factoryId: string,           // P_factory — init-arg dell'app B; discrimina provision vs cambio-app sovrano
  *   healthPing?: string|null,    // metodo query "vivo" di B (default null: solo app_version)
  *   onProgress?: (step: string, detail?: string) => void,
  * }} opts
  * @returns {Promise<{ ok: boolean, phase: string, snapshotId: Uint8Array|null, error?: string }>}
  */
-export function runReinstall({ canisterId, manifest, onChainSha256, healthPing = null, onProgress = () => {} }) {
-  return runUpgrade({ canisterId, manifest, mode: 'reinstall', onChainSha256, healthPing, onProgress });
+export function runReinstall({ canisterId, manifest, onChainSha256, spawnerId, factoryId, healthPing = null, onProgress = () => {} }) {
+  return runUpgrade({ canisterId, manifest, mode: 'reinstall', onChainSha256, platformInit: { spawnerId, factoryId }, healthPing, onProgress });
 }
 
 /**

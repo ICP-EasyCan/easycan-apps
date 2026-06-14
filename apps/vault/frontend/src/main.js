@@ -53,7 +53,7 @@ setDefaultIdlFactory(idlFactory);
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
   releaseTag: 'vault-v0.2.0',
-  releaseSha256: 'f2010e0e5ee68d752d0895cd71304d46fa9bf7e634f5a0d3517399e353d53448',
+  releaseSha256: '12ba22b4539b01b0d054678fffdd4a082ffb2f5e5bc8d60e60a4a8ed4090b397',
   dockerPackage: 'vault-canister',
   e2eeFrontend: true,       // il vault cifra nel frontend → caveat E2EE
 };
