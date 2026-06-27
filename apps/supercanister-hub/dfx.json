@@ -1,0 +1,19 @@
+{
+  "canisters": {
+    "hub": {
+      "type": "custom",
+      "candid": "canister/hub_canister.did",
+      "wasm": "../../target/wasm32-unknown-unknown/release/hub_canister.wasm",
+      "build": [],
+      "metadata": [
+        { "name": "candid:service", "path": "canister/hub_canister.did" }
+      ]
+    },
+    "internet_identity": {
+      "type": "pull",
+      "id": "rdmx6-jaaaa-aaaaa-aaadq-cai"
+    }
+  },
+  "defaults": { "build": { "packtool": "" } },
+  "version": 1
+}

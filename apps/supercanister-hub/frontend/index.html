@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>EasyHub</title>
+  <link rel="icon" href="data:,">
+  <!--
+    CSP — la shell è codice fidato e certificato. Limita le superfici di rete del kernel:
+    - connect-src: solo l'API del replica/IC + GitHub raw (catalogo Store, fetch+verify hash).
+    - frame-src 'self': i bundle si servono dallo STESSO origin sotto /m/{id}/, ma l'iframe è
+      sandbox="allow-scripts" (senza allow-same-origin) → origin opaco, niente sessione II, nessun
+      accesso ai dati del parent. L'unico canale bundle→shell è postMessage (bridge fidato).
+    - 'wasm-unsafe-eval': @dfinity/agent verifica i certificati via BLS in wasm.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="
+    default-src 'self';
+    connect-src 'self' http://127.0.0.1:4943 https://ic0.app https://*.ic0.app https://*.icp0.io https://raw.githubusercontent.com;
+    frame-src 'self';
+    script-src 'self' 'wasm-unsafe-eval';
+    style-src 'self' 'unsafe-inline';
+    img-src 'self' data: https:;
+    font-src 'self' data:;
+  ">
+  <link rel="stylesheet" href="/src/styles/hub.css">
+</head>
+<body>
+  <div id="app" class="app-shell">
+    <header id="app-header" class="app-header" style="display: none;">
+      <a href="#home" class="app-brand">
+        Easy<span class="app-brand-accent">Hub</span>
+      </a>
+      <nav id="top-nav-links" class="nav-links">
+        <a data-route="#home"        href="#home">Home</a>
+        <a data-route="#mini-apps"   href="#mini-apps">Mini-apps</a>
+        <a data-route="#automations" href="#automations">Automations</a>
+        <a data-route="#control-room" href="#control-room">Control Room</a>
+        <a data-route="#settings"    href="#settings">Settings</a>
+      </nav>
+      <div class="app-header-spacer"></div>
+      <div class="app-actions">
+        <span id="header-principal" class="header-principal"></span>
+        <button id="btn-logout" class="btn-ghost">Logout</button>
+      </div>
+    </header>
+
+    <main id="route-container" class="app-content"></main>
+
+    <!-- Stage persistente delle mini-app: gli iframe vivono qui (fuori dal route-container che il
+         router svuota), restano caricati tra una navigazione e l'altra → niente re-fetch ~2s. -->
+    <div id="bundle-stage" class="bundle-stage"></div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>

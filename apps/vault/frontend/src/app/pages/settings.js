@@ -68,6 +68,7 @@ function startCountUpdates() {
 export function renderSettings(container) {
   _renderSettings(container, {
     canisterId: CANISTER_ID,
+    showCanisterHealth: true,
     extraSections: [
       sovereigntyLinkSection(),
       verifyLinkSection(),

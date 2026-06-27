@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Capability JS condivise tra apps e portale. Importato via alias @shared in Vite.",
   "scripts": {
-    "test": "node --test src/core/"
+    "test": "node --test \"src/**/*.test.js\""
   },
   "dependencies": {
     "@dfinity/agent": "^3.4.3",

@@ -25,7 +25,9 @@ use std::cell::RefCell;
 //              50-59  cap-archive
 //              60-69  cap-crypto
 //              70-79  cap-crud
-//              80-199 libero (12 blocchi per future capability)
+//              80-89  cap-store       (KV + host bundle + permessi)
+//              90-99  cap-automation  (azioni + scheduler)
+//              100-199 libero (10 blocchi per future capability)
 //   200-249 → Runtime L2 (riservato)             [50 slot]
 //   250-255 → cap-platform (ponte SaaS)           [6 slot, 1 usato]
 //
@@ -76,7 +78,20 @@ pub const CRUD_COUNTER_MEM:  MemoryId = MemoryId::new(71);
 pub const CRUD_NS_INDEX_MEM: MemoryId = MemoryId::new(72);
 // 73-79: libero crud
 
-// ── 80-199: libero per future capability ──
+// ── cap-store (80-89) ──
+pub const STORE_KV_MEM:      MemoryId = MemoryId::new(80); // "namespace:key" → value (KV unico: dati bundle + settings shell)
+pub const STORE_BUNDLE_META: MemoryId = MemoryId::new(81); // module_id → {version, sha256 verificato, files[], permissions, installed_at}  (F1)
+pub const STORE_ASSETS_MEM:  MemoryId = MemoryId::new(82); // "{module_id}/{path}" → contenuto chunked  (F1)
+// 83-89: margine cap-store (es. tabella permessi separata)
+
+// ── cap-automation (90-99) ──
+pub const AUTO_JOBS_MEM:      MemoryId = MemoryId::new(90); // job_id → {sequenza azioni dichiarata, owning_bundle, guardia?}  (F3)
+pub const AUTO_SCHEDULES_MEM: MemoryId = MemoryId::new(91); // schedule_id → {intervallo/next_run, job_id} — ri-armati in post_upgrade  (F3)
+pub const AUTO_STATUS_MEM:    MemoryId = MemoryId::new(92); // job_id → ultimo esito  (F3)
+pub const AUTO_LOG_MEM:       MemoryId = MemoryId::new(93); // ring buffer log esecuzioni (auto-conoscenza)  (F3)
+// 94-99: margine cap-automation
+
+// ── 100-199: libero per future capability ──
 
 // ── cap-platform (250-255 — range piattaforma) ──
 pub const PLATFORM_STATE_MEM: MemoryId = MemoryId::new(250);
@@ -176,6 +191,13 @@ mod tests {
             CRUD_RECORDS_MEM,
             CRUD_COUNTER_MEM,
             CRUD_NS_INDEX_MEM,
+            STORE_KV_MEM,
+            STORE_BUNDLE_META,
+            STORE_ASSETS_MEM,
+            AUTO_JOBS_MEM,
+            AUTO_SCHEDULES_MEM,
+            AUTO_STATUS_MEM,
+            AUTO_LOG_MEM,
             PLATFORM_STATE_MEM,
         ];
         // Nessun duplicato
@@ -214,6 +236,13 @@ mod tests {
             ("CRUD_RECORDS",           CRUD_RECORDS_MEM,           70..80),
             ("CRUD_COUNTER",           CRUD_COUNTER_MEM,           70..80),
             ("CRUD_NS_INDEX",          CRUD_NS_INDEX_MEM,          70..80),
+            ("STORE_KV",               STORE_KV_MEM,               80..90),
+            ("STORE_BUNDLE_META",      STORE_BUNDLE_META,          80..90),
+            ("STORE_ASSETS",           STORE_ASSETS_MEM,           80..90),
+            ("AUTO_JOBS",              AUTO_JOBS_MEM,              90..100),
+            ("AUTO_SCHEDULES",         AUTO_SCHEDULES_MEM,         90..100),
+            ("AUTO_STATUS",            AUTO_STATUS_MEM,            90..100),
+            ("AUTO_LOG",               AUTO_LOG_MEM,              90..100),
         ];
 
         for (name, mem_id, range) in rules {

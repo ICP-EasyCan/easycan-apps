@@ -1,0 +1,18 @@
+{
+  "app_id": "hub",
+  "crate_name": "hub-canister",
+  "developer_name": "ICP Sovereign",
+  "short_description": "A sovereign on-chain computer — awake when you're not, guarding what only you can see, doing what you told it, verifiably",
+  "category": "Productivity",
+  "price_e8s_xdr": 100000000,
+  "full_description": "EasyHub is a personal sovereign computer you own after claim — a canister that controls itself, with no backdoor and no admin recovery. It acts for you while you sleep (automations that run with your browser closed), guards what only you can see (VetKeys encryption, released only on the conditions you set), and lets you prove exactly what it is running: its behavior is an enumerable, hash-verified manifest, not a black box. It can extend itself with hash-verified installable mini-apps, each confined to the permissions you approved.",
+  "features": [
+    "An awake agent: scheduled actions that run with your browser closed",
+    "Guards your secrets — VetKeys encryption, released only on your conditions",
+    "Verifiable agent: an enumerable, hash-checked manifest of what it can do — not a black box",
+    "Reaches the outside world (HTTP, inter-canister) only through jobs you armed",
+    "Extensible: hash-verified mini-apps, each sandboxed to the permissions you approved",
+    "Self-sovereign: you own your canister, no backdoor, no admin recovery"
+  ],
+  "website_url": null
+}

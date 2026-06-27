@@ -249,6 +249,58 @@ export async function deriveKey(actor, contextName, derivation, selfOverride) {
   }
 }
 
+/**
+ * deriveReleaseKey — decifratura lato-EREDE della capsula (dead-man's switch dell'hub).
+ *
+ * Diverge da `deriveKey` su DUE punti, e solo quelli:
+ *  1. chiama `release_derive_key(transport_pk)` (la PORTA condizionale host) invece di
+ *     `derive_encrypted_key` — l'host autorizza la derivazione solo a owner / erede-dopo-silenzio;
+ *  2. costruisce l'input di derivazione col principal OWNER (non col chiamante) perché l'host
+ *     deriva SEMPRE con l'owner come derivation-owner → la chiave combacia con quella di setup.
+ * Context, DerivedPublicKey e domain-separator simmetrico sono identici a `deriveKey`, così la
+ * AES-GCM ricostruita è bit-per-bit la stessa con cui l'owner ha cifrato. Non cachata (uso one-shot).
+ *
+ * @param {object} actor — actor host con get_verification_key + release_derive_key.
+ * @param {string} contextName — "hub-capsule".
+ * @param {Derivation} derivation — { type:'stored', dataId:'__capsule' }.
+ * @param {Principal} ownerPrincipal — owner pubblico del canister (da get_user_principal).
+ * @returns {Promise<CryptoKey>}
+ */
+export async function deriveReleaseKey(actor, contextName, derivation, ownerPrincipal) {
+  if (typeof actor?.get_verification_key !== 'function' ||
+      typeof actor?.release_derive_key !== 'function') {
+    throw new Error('crypto: actor missing release methods (host non espone gli endpoint release_*)');
+  }
+  if (typeof contextName !== 'string' || contextName.length === 0) {
+    throw new Error('crypto: contextName must be a non-empty string');
+  }
+  if (!ownerPrincipal || typeof ownerPrincipal.toUint8Array !== 'function') {
+    throw new Error('crypto: deriveReleaseKey requires the owner Principal');
+  }
+
+  const tsk = TransportSecretKey.random();
+  const [dpkHex, encKeyHex] = await Promise.all([
+    Promise.resolve(actor.get_verification_key(contextName))
+      .then((r) => unwrapResult(r, 'get_verification_key')),
+    Promise.resolve(actor.release_derive_key(tsk.publicKeyBytes()))
+      .then((r) => unwrapResult(r, 'release_derive_key')),
+  ]);
+
+  const dpk = DerivedPublicKey.deserialize(fromHex(dpkHex));
+  const ek  = EncryptedVetKey.deserialize(fromHex(encKeyHex));
+
+  const input = derivationInput(derivation, ownerPrincipal.toUint8Array());
+  const vetKey = ek.decryptAndVerify(tsk, dpk, input);
+  const rawAes = vetKey.deriveSymmetricKey(`cap-crypto/v1/aes256/${contextName}`, AES_KEY_LEN_BYTES);
+
+  return crypto.subtle.importKey(
+    'raw', rawAes,
+    { name: 'AES-GCM', length: AES_KEY_LEN_BITS },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
 // ─── API: encrypt / decrypt (binary) ─────────────────────────────────────────
 
 /**
@@ -306,3 +358,273 @@ export async function encryptString(text, key) {
 export async function decryptString(envelope, key) {
   return new TextDecoder().decode(await decrypt(envelope, key));
 }
+
+// ─── API: strato a strategia — sigillatura per metodo ─────────────────────────
+//
+// La capsula/eredità di EasyHub non cabla il metodo di sigillatura: lo dichiara.
+// Un envelope-metodo avvolge il ciphertext con un'ETICHETTA così che owner ed
+// erede (e domani altre app) riconoscano COME è sigillato senza decifrare. Oggi
+// è implementato solo `passphrase` (out-of-band: il canister tiene solo
+// ciphertext, nulla di decifrabile sulla subnet). `vetkeys`/`subnetkey` sono
+// riservati e riconoscibili in anticipo → aggiungerli domani è additivo e NON
+// tocca lo scheletro di push outbound né `cap_crypto::derive_encrypted_key`
+// (che resta vivo in core/, in panchina). Cfr. principio outbound-only +
+// PLAN supercanister_hub_capsula_outbound.
+//
+// Formato (self-descrittivo, JSON UTF-8 → bytes opachi per il backend):
+//   { v:1, method:'passphrase', kdf:{ algo:'PBKDF2-SHA256', salt:<b64>, iter:N },
+//     ct:<b64 dell'envelope binario di encrypt()> }
+// Il backend lo vede come `Vec<u8>` opaco → nessun cambio `.did`. L'erede lo
+// decifra con un decryptor puramente client-side (zero chiamate al canister).
+
+export const METHOD_PASSPHRASE = 'passphrase';
+export const METHOD_VETKEYS    = 'vetkeys';
+export const METHOD_SUBNETKEY  = 'subnetkey';
+
+const METHOD_ENVELOPE_V1 = 1;
+const PBKDF2_ALGO = 'PBKDF2-SHA256';
+// OWASP 2023 per PBKDF2-HMAC-SHA256. È persistito nell'envelope (kdf.iter) →
+// alzarlo in futuro non rompe gli envelope già sigillati.
+const PBKDF2_DEFAULT_ITER = 600_000;
+const PBKDF2_SALT_LEN = 16;
+
+function toB64(bytes) {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+  return btoa(s);
+}
+
+function fromB64(b64) {
+  const s = atob(b64);
+  const out = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+
+/**
+ * Deriva una CryptoKey AES-GCM-256 da una passphrase via PBKDF2-HMAC-SHA256.
+ * Non cachata (uso one-shot per sigillo/apertura). cap-crypto NON è coinvolto:
+ * tutto avviene nel browser, nessun roundtrip al canister.
+ *
+ * @param {string} passphrase
+ * @param {Uint8Array} salt
+ * @param {number} [iterations=PBKDF2_DEFAULT_ITER]
+ * @returns {Promise<CryptoKey>}
+ */
+export async function deriveKeyFromPassphrase(passphrase, salt, iterations = PBKDF2_DEFAULT_ITER) {
+  if (typeof passphrase !== 'string' || passphrase.length === 0) {
+    throw new Error('crypto: deriveKeyFromPassphrase requires a non-empty passphrase');
+  }
+  if (!(salt instanceof Uint8Array) || salt.length === 0) {
+    throw new Error('crypto: deriveKeyFromPassphrase requires a non-empty Uint8Array salt');
+  }
+  const baseKey = await crypto.subtle.importKey(
+    'raw', new TextEncoder().encode(passphrase),
+    { name: 'PBKDF2' }, false, ['deriveKey'],
+  );
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
+    baseKey,
+    { name: 'AES-GCM', length: AES_KEY_LEN_BITS },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+}
+
+/**
+ * Genera una passphrase forte da consegnare all'erede out-of-band.
+ * Charset senza caratteri ambigui (no 0/O/1/l/I). ~5.95 bit/char → 24 char ≈ 142 bit.
+ *
+ * @param {number} [length=24]
+ * @returns {string}
+ */
+export function generatePassphrase(length = 24) {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+  const rnd = crypto.getRandomValues(new Uint8Array(length));
+  let out = '';
+  // Rejection sampling per evitare il bias del modulo sui 256 valori.
+  for (let i = 0; i < length; i++) {
+    let v = rnd[i];
+    while (v >= 256 - (256 % alphabet.length)) {
+      v = crypto.getRandomValues(new Uint8Array(1))[0];
+    }
+    out += alphabet[v % alphabet.length];
+  }
+  return out;
+}
+
+/**
+ * Sigilla un plaintext con una passphrase → envelope-metodo (bytes opachi).
+ * Riusa `encrypt()` (envelope binario v1) come ciphertext interno.
+ *
+ * @param {Uint8Array} plaintext
+ * @param {string} passphrase
+ * @param {{ iterations?: number }} [opts]
+ * @returns {Promise<Uint8Array>} envelope-metodo JSON-UTF8 (storage-ready)
+ */
+export async function sealWithPassphrase(plaintext, passphrase, opts = {}) {
+  if (!(plaintext instanceof Uint8Array)) {
+    throw new Error('crypto: sealWithPassphrase requires Uint8Array plaintext');
+  }
+  const iterations = opts.iterations ?? PBKDF2_DEFAULT_ITER;
+  const salt = crypto.getRandomValues(new Uint8Array(PBKDF2_SALT_LEN));
+  const key = await deriveKeyFromPassphrase(passphrase, salt, iterations);
+  const inner = await encrypt(plaintext, key);
+  const env = {
+    v: METHOD_ENVELOPE_V1,
+    method: METHOD_PASSPHRASE,
+    kdf: { algo: PBKDF2_ALGO, salt: toB64(salt), iter: iterations },
+    ct: toB64(inner),
+  };
+  return new TextEncoder().encode(JSON.stringify(env));
+}
+
+/**
+ * Apre un envelope-metodo `passphrase`. Decryptor puramente client-side.
+ *
+ * @param {Uint8Array} envelopeBytes
+ * @param {string} passphrase
+ * @returns {Promise<Uint8Array>} plaintext
+ */
+export async function openWithPassphrase(envelopeBytes, passphrase) {
+  const env = parseMethodEnvelope(envelopeBytes);
+  if (env.method !== METHOD_PASSPHRASE) {
+    throw new Error(`crypto: openWithPassphrase non gestisce method='${env.method}'`);
+  }
+  if (env.kdf?.algo !== PBKDF2_ALGO) {
+    throw new Error(`crypto: unsupported kdf algo '${env.kdf?.algo}'`);
+  }
+  const salt = fromB64(env.kdf.salt);
+  const iterations = env.kdf.iter;
+  if (!Number.isInteger(iterations) || iterations <= 0) {
+    throw new Error('crypto: envelope kdf.iter invalido');
+  }
+  const key = await deriveKeyFromPassphrase(passphrase, salt, iterations);
+  return decrypt(fromB64(env.ct), key);
+}
+
+/** Zucchero stringa per `sealWithPassphrase`. */
+export async function sealStringWithPassphrase(text, passphrase, opts) {
+  return sealWithPassphrase(new TextEncoder().encode(text), passphrase, opts);
+}
+
+/** Zucchero stringa per `openWithPassphrase`. */
+export async function openStringWithPassphrase(envelopeBytes, passphrase) {
+  return new TextDecoder().decode(await openWithPassphrase(envelopeBytes, passphrase));
+}
+
+// ─── Sigillatura di un FILE (qualsiasi formato) ───────────────────────────────
+//
+// Un file ha byte arbitrari + due metadati che servono per restituirlo: `name` e
+// `mime`. Non si cifrano i byte grezzi: si cifra un CONTENITORE che impacchetta
+// metadati + byte, così che nome e mime stiano DENTRO il ciphertext — chi regge
+// l'envelope (canister, webhook dell'erede) non vede nemmeno come si chiama il
+// file. L'outer envelope-metodo resta invariato e opaco (`method:'passphrase'`),
+// uniforme tra testo e file: nessun `kind` trapela fuori dal ciphertext.
+//
+// Container (plaintext che entra in sealWithPassphrase):
+//   FILE_MAGIC(4) | headerLen:u32 LE | header JSON UTF-8 {name,mime} | raw bytes
+//
+// Il MAGIC distingue, DOPO la decifratura, un file da una capsula-testo legacy
+// (raw UTF-8, senza framing): l'opener decifra e, se trova il MAGIC, è un file.
+
+// "ECF1" = EasyCapsule File v1.
+const FILE_MAGIC = Uint8Array.of(0x45, 0x43, 0x46, 0x31);
+
+function frameFile(meta, bytes) {
+  if (!(bytes instanceof Uint8Array)) {
+    throw new Error('crypto: frameFile requires Uint8Array bytes');
+  }
+  const header = new TextEncoder().encode(JSON.stringify({
+    name: typeof meta?.name === 'string' ? meta.name : '',
+    mime: typeof meta?.mime === 'string' ? meta.mime : '',
+  }));
+  const lenLE = new Uint8Array(4);
+  new DataView(lenLE.buffer).setUint32(0, header.length, true);
+  return concatBytes(FILE_MAGIC, lenLE, header, bytes);
+}
+
+function unframeFile(plaintext) {
+  if (!(plaintext instanceof Uint8Array) || plaintext.length < FILE_MAGIC.length + 4) {
+    throw new Error('crypto: not a sealed file (too short)');
+  }
+  if (compareBytes(plaintext.subarray(0, FILE_MAGIC.length), FILE_MAGIC) !== 0) {
+    throw new Error('crypto: not a sealed file (bad magic)');
+  }
+  const off = FILE_MAGIC.length;
+  const headerLen = new DataView(plaintext.buffer, plaintext.byteOffset + off, 4).getUint32(0, true);
+  const headerStart = off + 4;
+  const headerEnd = headerStart + headerLen;
+  if (headerEnd > plaintext.length) {
+    throw new Error('crypto: sealed file corrotto (header len out of range)');
+  }
+  let meta;
+  try {
+    meta = JSON.parse(new TextDecoder().decode(plaintext.subarray(headerStart, headerEnd)));
+  } catch {
+    throw new Error('crypto: sealed file corrotto (header non JSON)');
+  }
+  // Copia (non subarray) → i byte restituiti non tengono in vita il buffer del plaintext.
+  return {
+    name: typeof meta?.name === 'string' ? meta.name : '',
+    mime: typeof meta?.mime === 'string' ? meta.mime : '',
+    bytes: plaintext.slice(headerEnd),
+  };
+}
+
+/**
+ * Sigilla un file (byte arbitrari + nome/mime) con una passphrase → envelope-metodo
+ * opaco, identico in forma a quello del testo. Riusa `sealWithPassphrase`.
+ *
+ * @param {Uint8Array} bytes — contenuto del file
+ * @param {{ name?: string, mime?: string }} meta
+ * @param {string} passphrase
+ * @param {{ iterations?: number }} [opts]
+ * @returns {Promise<Uint8Array>} envelope-metodo JSON-UTF8 (storage-ready)
+ */
+export async function sealFileWithPassphrase(bytes, meta, passphrase, opts) {
+  return sealWithPassphrase(frameFile(meta, bytes), passphrase, opts);
+}
+
+/**
+ * Apre un envelope-file sigillato con passphrase → `{ name, mime, bytes }`.
+ * Decryptor puramente client-side (lancia se l'envelope non è un file).
+ *
+ * @param {Uint8Array} envelopeBytes
+ * @param {string} passphrase
+ * @returns {Promise<{ name: string, mime: string, bytes: Uint8Array }>}
+ */
+export async function openFileWithPassphrase(envelopeBytes, passphrase) {
+  return unframeFile(await openWithPassphrase(envelopeBytes, passphrase));
+}
+
+function parseMethodEnvelope(envelopeBytes) {
+  if (!(envelopeBytes instanceof Uint8Array)) {
+    throw new Error('crypto: method envelope must be Uint8Array');
+  }
+  let env;
+  try {
+    env = JSON.parse(new TextDecoder().decode(envelopeBytes));
+  } catch {
+    throw new Error('crypto: method envelope non è JSON valido');
+  }
+  if (!env || typeof env !== 'object' || env.v !== METHOD_ENVELOPE_V1 || typeof env.method !== 'string') {
+    throw new Error('crypto: method envelope malformato (v/method)');
+  }
+  return env;
+}
+
+/**
+ * Riconosce il metodo di sigillatura SENZA decifrare. Permette a owner/erede/UI
+ * di sapere quale strategia serve (oggi solo 'passphrase'; 'vetkeys'/'subnetkey'
+ * riconoscibili in anticipo) prima di chiedere la passphrase.
+ *
+ * @param {Uint8Array} envelopeBytes
+ * @returns {string} uno tra METHOD_*
+ */
+export function readEnvelopeMethod(envelopeBytes) {
+  return parseMethodEnvelope(envelopeBytes).method;
+}
+
+/** @internal Esposto per i test. */
+export const __methodInternalsForTest = { toB64, fromB64, parseMethodEnvelope, frameFile, unframeFile, FILE_MAGIC };

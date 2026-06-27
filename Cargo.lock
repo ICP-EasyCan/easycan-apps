@@ -230,6 +230,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "cap-automation"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cap-store",
+ "core-storage",
+ "core-types",
+ "ic-cdk",
+ "ic-stable-structures 0.7.2",
+ "serde",
+ "serde_json",
+ "sha2",
+]
+
+[[package]]
 name = "cap-crud"
 version = "0.1.0"
 dependencies = [
@@ -315,6 +330,19 @@ dependencies = [
  "ic-cdk",
  "ic-stable-structures 0.7.2",
  "serde",
+]
+
+[[package]]
+name = "cap-store"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "core-storage",
+ "core-types",
+ "ic-cdk",
+ "ic-stable-structures 0.7.2",
+ "serde",
+ "sha2",
 ]
 
 [[package]]
@@ -882,6 +910,27 @@ name = "httparse"
 version = "1.10.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
+
+[[package]]
+name = "hub-canister"
+version = "0.1.0"
+dependencies = [
+ "candid",
+ "cap-automation",
+ "cap-crypto",
+ "cap-platform",
+ "cap-store",
+ "core-assets",
+ "core-auth",
+ "core-storage",
+ "core-timer",
+ "core-types",
+ "ic-cdk",
+ "ic-stable-structures 0.7.2",
+ "icrc-ledger-types",
+ "pocket-ic",
+ "serde",
+]
 
 [[package]]
 name = "hyper"

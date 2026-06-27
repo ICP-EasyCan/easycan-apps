@@ -1,0 +1,15 @@
+[package]
+name = "cap-automation"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+core-types.workspace = true
+core-storage.workspace = true
+candid.workspace = true
+ic-cdk.workspace = true
+ic-stable-structures.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+cap-store.workspace = true

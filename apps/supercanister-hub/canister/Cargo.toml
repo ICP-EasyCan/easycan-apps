@@ -1,0 +1,41 @@
+[package]
+name = "hub-canister"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+default = []
+platform = ["cap-platform"]
+
+[dependencies]
+# Core
+core-types.workspace = true
+core-storage.workspace = true
+core-auth.workspace = true
+core-assets.workspace = true
+core-timer.workspace = true
+
+# Platform bridge (opzionale — attivato con --features platform)
+cap-platform = { workspace = true, optional = true }
+
+# Capability
+cap-store.workspace = true
+cap-automation.workspace = true
+cap-crypto.workspace = true
+
+# IC SDK
+candid.workspace = true
+ic-cdk.workspace = true
+ic-stable-structures.workspace = true
+serde.workspace = true
+
+# Test d'integrazione (G2a/G2b — motore async dal vivo su PocketIC): provano che gli outcall
+# `Http` e le `CanisterCall` partono per davvero (finora authorization-only). Solo dev.
+# `icrc-ledger-types` serve a G2b per codificare gli argomenti di una `CanisterCall` verso un
+# ledger ICRC reale (`test_mock_ledger`): canister ETEROGENEO, non più self-call.
+[dev-dependencies]
+pocket-ic.workspace = true
+icrc-ledger-types.workspace = true

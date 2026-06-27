@@ -28,9 +28,20 @@ import {
   decrypt,
   encryptString,
   decryptString,
+  deriveKeyFromPassphrase,
+  generatePassphrase,
+  sealWithPassphrase,
+  openWithPassphrase,
+  sealStringWithPassphrase,
+  openStringWithPassphrase,
+  sealFileWithPassphrase,
+  openFileWithPassphrase,
+  readEnvelopeMethod,
+  METHOD_PASSPHRASE,
   __setDeriveAesHookForTest,
   __resetDeriveAesHookForTest,
   __internalsForTest,
+  __methodInternalsForTest,
 } from './crypto.js';
 
 const { derivationInput } = __internalsForTest;
@@ -306,4 +317,176 @@ test('deriveKey: hook ritorna lunghezza sbagliata → throw esplicito', async ()
     () => deriveKey(actor, 'vault', { type: 'stored', dataId: 'x' }, ALICE),
     /VetKD derived key has wrong length/,
   );
+});
+
+// ─── Strato a strategia: sigillatura passphrase (off-canister) ────────────────
+
+test('passphrase: round-trip binario seal→open', async () => {
+  const pt = new Uint8Array([9, 8, 7, 6, 5, 4, 3, 2, 1, 0]);
+  const env = await sealWithPassphrase(pt, 'correct horse battery staple');
+  // Iterazioni basse opzionali NON usate qui: verifichiamo il default reale.
+  const back = await openWithPassphrase(env, 'correct horse battery staple');
+  assert.deepEqual(Array.from(back), Array.from(pt));
+});
+
+test('passphrase: round-trip stringa seal→open', async () => {
+  const msg = 'eredità 🗝️ — multi-byte';
+  const env = await sealStringWithPassphrase(msg, 'pw-test', { iterations: 50_000 });
+  assert.equal(await openStringWithPassphrase(env, 'pw-test'), msg);
+});
+
+test('passphrase: passphrase errata → throw (decrypt failed)', async () => {
+  const env = await sealStringWithPassphrase('segreto', 'giusta', { iterations: 50_000 });
+  await assert.rejects(() => openStringWithPassphrase(env, 'sbagliata'), /decrypt failed/);
+});
+
+test('passphrase: envelope auto-descrittivo — method riconosciuto SENZA decifrare', async () => {
+  const env = await sealStringWithPassphrase('x', 'pw', { iterations: 50_000 });
+  assert.equal(readEnvelopeMethod(env), METHOD_PASSPHRASE);
+  // Forma JSON self-descrittiva con etichetta + kdf + ct.
+  const parsed = JSON.parse(new TextDecoder().decode(env));
+  assert.equal(parsed.v, 1);
+  assert.equal(parsed.method, 'passphrase');
+  assert.equal(parsed.kdf.algo, 'PBKDF2-SHA256');
+  assert.equal(parsed.kdf.iter, 50_000);
+  assert.ok(typeof parsed.kdf.salt === 'string' && parsed.kdf.salt.length > 0);
+  assert.ok(typeof parsed.ct === 'string' && parsed.ct.length > 0);
+});
+
+test('decryptor #decrypt — flusso reale: generatePassphrase → sealString → openString chiude', async () => {
+  // Il flusso vero della capsula: l'owner genera una passphrase FORTE (consegnata out-of-band),
+  // sigilla il segreto, l'erede la apre nel decryptor #decrypt (puramente client-side). Verifica che
+  // l'output di generatePassphrase funzioni come chiave end-to-end (i test 330/391 coprono il
+  // round-trip a passphrase fissa e il charset, non l'integrazione delle due).
+  const pass = generatePassphrase(24);
+  const secret = 'wallet seed: alpha bravo charlie 🗝️';
+  const env = await sealStringWithPassphrase(secret, pass, { iterations: 50_000 });
+  assert.equal(await openStringWithPassphrase(env, pass), secret);
+});
+
+test('decryptor #decrypt — guard: envelope di metodo diverso riconosciuto e RESPINTO', async () => {
+  // Il decryptor #decrypt prima riconosce il metodo (readEnvelopeMethod), poi apre con
+  // openStringWithPassphrase. Un envelope di metodo FUTURO (es. 'vetkeys' dello strato-strategia)
+  // deve essere (a) riconosciuto come ≠ passphrase → l'UI lo rifiuta prima di chiedere la passphrase,
+  // e (b) respinto comunque da openWithPassphrase (difesa in profondità: il guard #decrypt).
+  const foreign = new TextEncoder().encode(JSON.stringify({
+    v: 1,
+    method: 'vetkeys',
+    kdf: { algo: 'PBKDF2-SHA256', salt: 'c2FsdHk', iter: 50_000 },
+    ct: 'Y2lwaGVy',
+  }));
+  assert.equal(readEnvelopeMethod(foreign), 'vetkeys');
+  assert.notEqual(readEnvelopeMethod(foreign), METHOD_PASSPHRASE);
+  await assert.rejects(
+    () => openStringWithPassphrase(foreign, 'qualsiasi'),
+    /non gestisce method='vetkeys'/,
+  );
+});
+
+test('passphrase: iter persistito → open usa il valore dell\'envelope, non il default', async () => {
+  // Sigillo con iter custom; l'apertura deve dedurlo dall'envelope.
+  const env = await sealStringWithPassphrase('y', 'pw', { iterations: 12_345 });
+  assert.equal(JSON.parse(new TextDecoder().decode(env)).kdf.iter, 12_345);
+  assert.equal(await openStringWithPassphrase(env, 'pw'), 'y');
+});
+
+test('passphrase: salt random → due sigilli dello stesso plaintext sono diversi', async () => {
+  const e1 = await sealStringWithPassphrase('z', 'pw', { iterations: 50_000 });
+  const e2 = await sealStringWithPassphrase('z', 'pw', { iterations: 50_000 });
+  assert.notDeepEqual(Array.from(e1), Array.from(e2));
+});
+
+test('deriveKeyFromPassphrase: stesso (pw,salt,iter) → chiave interscambiabile; salt diverso → no', async () => {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const k1 = await deriveKeyFromPassphrase('pw', salt, 50_000);
+  const k2 = await deriveKeyFromPassphrase('pw', salt, 50_000);
+  const env = await encrypt(new TextEncoder().encode('hi'), k1);
+  assert.equal(new TextDecoder().decode(await decrypt(env, k2)), 'hi');
+
+  const otherSalt = crypto.getRandomValues(new Uint8Array(16));
+  const k3 = await deriveKeyFromPassphrase('pw', otherSalt, 50_000);
+  await assert.rejects(() => decrypt(env, k3), /decrypt failed/);
+});
+
+test('deriveKeyFromPassphrase: passphrase vuota / salt vuoto → throw esplicito', async () => {
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  await assert.rejects(() => deriveKeyFromPassphrase('', salt), /non-empty passphrase/);
+  await assert.rejects(() => deriveKeyFromPassphrase('pw', new Uint8Array(0)), /non-empty Uint8Array salt/);
+});
+
+test('readEnvelopeMethod: envelope non-JSON / malformato → throw esplicito (no silent)', () => {
+  assert.throws(() => readEnvelopeMethod(new Uint8Array([0xFF, 0x00])), /non è JSON valido/);
+  const bad = new TextEncoder().encode(JSON.stringify({ v: 1 })); // manca method
+  assert.throws(() => readEnvelopeMethod(bad), /malformato/);
+});
+
+test('generatePassphrase: lunghezza richiesta, charset senza caratteri ambigui', () => {
+  const p = generatePassphrase(32);
+  assert.equal(p.length, 32);
+  assert.ok(!/[0O1lI]/.test(p), 'niente 0/O/1/l/I');
+  // Due generazioni consecutive non collidono (entropia reale).
+  assert.notEqual(generatePassphrase(24), generatePassphrase(24));
+});
+
+test('b64 helper: round-trip su bytes arbitrari (parity browser/Node)', () => {
+  const { toB64, fromB64 } = __methodInternalsForTest;
+  const bytes = crypto.getRandomValues(new Uint8Array(257));
+  assert.deepEqual(Array.from(fromB64(toB64(bytes))), Array.from(bytes));
+});
+
+// ─── Sigillatura di un FILE (qualsiasi formato) ───────────────────────────────
+
+test('file: round-trip su byte non-UTF8 → name/mime/bytes preservati', async () => {
+  // Byte arbitrari, inclusi 0x00/0xFF/sequenze non valide come UTF-8.
+  const bytes = Uint8Array.of(0x00, 0xFF, 0xFE, 0x80, 0xC0, 0x01, 0x7F, 0x90);
+  const env = await sealFileWithPassphrase(bytes, { name: 'foto.png', mime: 'image/png' }, 'pw', { iterations: 50_000 });
+  const out = await openFileWithPassphrase(env, 'pw');
+  assert.equal(out.name, 'foto.png');
+  assert.equal(out.mime, 'image/png');
+  assert.deepEqual(Array.from(out.bytes), Array.from(bytes));
+});
+
+test('file: round-trip su buffer ~1 MB', async () => {
+  const bytes = new Uint8Array(1024 * 1024);
+  for (let off = 0; off < bytes.length; off += 65536) {
+    crypto.getRandomValues(bytes.subarray(off, off + 65536)); // getRandomValues: max 64 KB/chiamata
+  }
+  const env = await sealFileWithPassphrase(bytes, { name: 'big.bin', mime: 'application/octet-stream' }, 'pw', { iterations: 1_000 });
+  const out = await openFileWithPassphrase(env, 'pw');
+  assert.equal(out.bytes.length, bytes.length);
+  assert.deepEqual(Array.from(out.bytes.subarray(0, 32)), Array.from(bytes.subarray(0, 32)));
+  assert.deepEqual(Array.from(out.bytes.subarray(-32)), Array.from(bytes.subarray(-32)));
+});
+
+test('file: envelope-metodo opaco identico in forma a quello del testo (method=passphrase, no leak kind/name)', async () => {
+  const env = await sealFileWithPassphrase(Uint8Array.of(1, 2, 3), { name: 'segreto.pdf', mime: 'application/pdf' }, 'pw', { iterations: 1_000 });
+  const parsed = JSON.parse(new TextDecoder().decode(env));
+  assert.equal(parsed.method, 'passphrase');     // riconoscibile come gli altri, senza decifrare
+  assert.equal(parsed.kind, undefined);           // niente file-vs-testo fuori dal ciphertext
+  assert.ok(!new TextDecoder().decode(env).includes('segreto.pdf')); // il nome non trapela
+});
+
+test('file: passphrase errata → throw (decrypt failed, prima di unframe)', async () => {
+  const env = await sealFileWithPassphrase(Uint8Array.of(9, 9, 9), { name: 'x', mime: '' }, 'giusta', { iterations: 1_000 });
+  await assert.rejects(() => openFileWithPassphrase(env, 'sbagliata'), /decrypt failed/);
+});
+
+test('file: aprire una capsula-TESTO come file → throw (bad magic, niente falso file)', async () => {
+  const env = await sealStringWithPassphrase('solo testo', 'pw', { iterations: 1_000 });
+  await assert.rejects(() => openFileWithPassphrase(env, 'pw'), /not a sealed file/);
+});
+
+test('file: capsula-TESTO legacy resta apribile come stringa (retro-compat invariata)', async () => {
+  const env = await sealStringWithPassphrase('ciao', 'pw', { iterations: 1_000 });
+  assert.equal(await openStringWithPassphrase(env, 'pw'), 'ciao');
+});
+
+test('file: frame/unframe diretti — header corrotto (len out of range) → throw', () => {
+  const { frameFile, unframeFile } = __methodInternalsForTest;
+  const framed = frameFile({ name: 'a', mime: 'b' }, Uint8Array.of(1, 2));
+  assert.deepEqual(unframeFile(framed).bytes, Uint8Array.of(1, 2));
+  // Sfondo il campo headerLen (offset 4..8) con un valore enorme.
+  const broken = framed.slice();
+  new DataView(broken.buffer).setUint32(4, 0xFFFFFFFF, true);
+  assert.throws(() => unframeFile(broken), /out of range/);
 });

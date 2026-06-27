@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Hub Test Bundle</title>
+  <style>
+    body { font-family: system-ui, sans-serif; padding: 1rem; color: #111; }
+    h1 { font-size: 1.2rem; }
+    .row { margin: 0.5rem 0; }
+    .ok { color: #15803d; }
+    .err { color: #b91c1c; }
+    pre { background: #f4f4f5; padding: 0.6rem; border-radius: 6px; white-space: pre-wrap; }
+    button { font: inherit; padding: 0.4rem 0.8rem; margin-right: 0.4rem; cursor: pointer; }
+  </style>
+</head>
+<body>
+  <h1>Hub Test Bundle</h1>
+  <p>Namespace: <code id="ns">com.easycan.test</code> — runs inside a sandboxed iframe; talks to the shell only via postMessage.</p>
+  <div class="row">
+    <button id="b-self">Write+read OWN namespace</button>
+    <button id="b-cross">Attempt CROSS namespace (must fail)</button>
+    <button id="b-list">List own keys</button>
+  </div>
+  <pre id="out">ready.</pre>
+
+  <script>
+    const OWN = 'com.easycan.test';
+    const OTHER = 'com.easycan.forbidden';
+    const out = document.getElementById('out');
+    const log = (msg, cls) => { out.innerHTML += `\n${cls ? `<span class="${cls}">${msg}</span>` : msg}`; };
+
+    // Bridge client: wraps postMessage(parent) with rid-correlated promises.
+    let _rid = 0;
+    const _pending = new Map();
+    window.addEventListener('message', (ev) => {
+      const m = ev.data;
+      if (!m || m.__hub !== 1 || !m.rid) return;
+      const p = _pending.get(m.rid);
+      if (!p) return;
+      _pending.delete(m.rid);
+      m.ok ? p.resolve(m.value) : p.reject(new Error(m.error || 'bridge error'));
+    });
+    function callHost(op, ns, key, value) {
+      const rid = `r${++_rid}`;
+      return new Promise((resolve, reject) => {
+        _pending.set(rid, { resolve, reject });
+        parent.postMessage({ __hub: 1, rid, op, ns, key, value }, '*');
+        setTimeout(() => { if (_pending.has(rid)) { _pending.delete(rid); reject(new Error('timeout')); } }, 8000);
+      });
+    }
+
+    document.getElementById('b-self').onclick = async () => {
+      try {
+        await callHost('set', OWN, 'greeting', 'hello from bundle');
+        const v = await callHost('get', OWN, 'greeting');
+        log(`OWN write+read OK → "${v}"`, 'ok');
+      } catch (e) { log(`OWN failed: ${e.message}`, 'err'); }
+    };
+
+    document.getElementById('b-cross').onclick = async () => {
+      try {
+        await callHost('set', OTHER, 'x', 'should not be allowed');
+        log(`CROSS write SUCCEEDED — ISOLATION BROKEN!`, 'err');
+      } catch (e) { log(`CROSS write rejected (expected): ${e.message}`, 'ok'); }
+    };
+
+    document.getElementById('b-list').onclick = async () => {
+      try {
+        const keys = await callHost('list', OWN);
+        log(`OWN keys: ${JSON.stringify(keys)}`, 'ok');
+      } catch (e) { log(`list failed: ${e.message}`, 'err'); }
+    };
+  </script>
+</body>
+</html>

@@ -15,6 +15,8 @@ members = [
     "core/cap-crud",
     "core/cap-crypto",
     "core/cap-platform",
+    "core/cap-store",
+    "core/cap-automation",
 
 
 
@@ -22,6 +24,7 @@ members = [
     # ── APPS ─────────────────────────────────────────────────────────
     "apps/messenger/canister",
     "apps/vault/canister",
+    "apps/supercanister-hub/canister",
 
 ]
 
@@ -64,6 +67,8 @@ cap-archive   = { path = "core/cap-archive" }
 cap-crud      = { path = "core/cap-crud" }
 cap-crypto    = { path = "core/cap-crypto" }
 cap-platform  = { path = "core/cap-platform" }
+cap-store     = { path = "core/cap-store" }
+cap-automation = { path = "core/cap-automation" }
 
 
 [profile.release]

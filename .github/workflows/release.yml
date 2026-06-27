@@ -23,6 +23,7 @@ on:
     tags:
       - 'vault-v*'
       - 'messenger-v*'
+      - 'supercanister-hub-v*'
 
 permissions:
   contents: write   # creare release + spostare tag
@@ -46,14 +47,16 @@ jobs:
         run: |
           set -euo pipefail
           TAG="${GITHUB_REF_NAME}"
-          APP="${TAG%%-v*}"                 # vault-v0.3.0 → vault
+          APP="${TAG%%-v*}"                 # vault-v0.3.0 → vault ; supercanister-hub-v0.1.0 → supercanister-hub
           VERSION="${TAG#${APP}-v}"         # vault-v0.3.0 → 0.3.0
+          # Mappa app→package: per vault/messenger lo slug coincide con <slug>-canister, ma per
+          # l'hub lo slug (supercanister-hub) ≠ crate (hub-canister) → override esplicito.
           case "$APP" in
-            vault|messenger) ;;
-            *) echo "::error::tag '$TAG' non riconosciuto (atteso vault-v* | messenger-v*)"; exit 1 ;;
+            vault|messenger)   PACKAGE="${APP}-canister" ;;
+            supercanister-hub) PACKAGE="hub-canister" ;;
+            *) echo "::error::tag '$TAG' non riconosciuto (atteso vault-v* | messenger-v* | supercanister-hub-v*)"; exit 1 ;;
           esac
-          PACKAGE="${APP}-canister"
-          WASM_NAME="${PACKAGE//-/_}"       # vault-canister → vault_canister
+          WASM_NAME="${PACKAGE//-/_}"       # vault-canister → vault_canister ; hub-canister → hub_canister
           {
             echo "tag=$TAG"
             echo "app=$APP"

@@ -1,0 +1,297 @@
+// Azione-primitiva. Gli argomenti stringa supportano il templating `{{stepN[.campo]}}` e i
+// token-tempo `{{now}}` / `{{now-N}}` / `{{now+N}}` (secondi d'esecuzione).
+// 
+// `KvSet/KvGet/KvDel/CryptoHash` (F3) sono **interne e sincrone**. `Http` (F3b) è **esterna e
+// async**: l'unico canale di esfiltrazione, quindi permission-gated via `cap_store::authorize_http`
+// *prima* dell'outcall (Owner libero; `Bundle(id)` solo verso `permissions.http_outcall_hosts`).
+// L'output dell'azione `Http` è il **body** della risposta (header scartati) → templatabile dagli
+// step successivi; il resolver JSON di `resolve_ref` estrae i campi da una risposta API.
+type Action = variant {
+  // HTTP outcall (F3b). `method` ∈ {GET,POST,HEAD}; `url`/`body` templatabili; `body` vuoto → nessun
+  // body; `max_response_bytes` 0 → default replica (2MB). Output = body della risposta (utf8-lossy).
+  Http : record {
+    url : text;
+    method : text;
+    max_response_bytes : nat64;
+    body : text;
+    headers : vec record { text; text };
+  };
+  KvDel : record { key : text; namespace : text };
+  KvGet : record { key : text; namespace : text };
+  KvSet : record { key : text; value : text; namespace : text };
+  // Chiamata inter-canister (F3c). Forma generica minimale: `canister_id` (Principal testuale,
+  // templatabile), `method`, e `arg_hex` = argomenti candid **già codificati** in esadecimale
+  // (autorati nel job, templatabili). Permission-gated via `cap_store::authorize_call` *prima*
+  // dell'await (Owner libero; `Bundle(id)` solo verso `permissions.inter_canister`). Output = i byte
+  // candid **raw della risposta in hex** (tipo ignoto nella forma generica → non li decodifichiamo;
+  // hex è deterministico e templatabile). A differenza di `Http`, un **reject del canister = `Err`**.
+  CanisterCall : record { method : text; canister_id : text; arg_hex : text };
+  // sha256(input) → hex. `input` templatabile.
+  CryptoHash : record { input : text };
+};
+type Actor = variant { Bundle : text; Owner };
+// Metadati dell'app esposti al marketplace.
+type AppMetadata = record {
+  admin : opt principal;
+  ejected : bool;
+  // Identita' portale del buyer (P_portal). None se l'app e' standalone,
+  // se non e' stato ancora settato, o se e' stato rimosso post-eject.
+  // Quando Some, il portale del marketplace ha (o aveva) accesso autenticato.
+  portal_owner : opt principal;
+  // Tier corrente: 0=demo, 1=pro.
+  tier : nat8;
+  is_standalone : bool;
+  spawner : opt principal;
+  // Portal owner originale, conservato anche post-eject. Post-A2 e' solo
+  // l'ancora di rifiuto che impedisce di ri-aggiungere P_portal come controller.
+  original_portal_owner : opt principal;
+  // Spawner originale, conservato anche post-eject. Identifica il marketplace
+  // di provenienza; usato per escludere EasyCan dalle backup-key dell'utente.
+  original_spawner : opt principal;
+  // Hash SHA256 del WASM installato (hex string). None = non ancora impostato.
+  // L'utente puo' verificare autonomamente l'integrita' del WASM.
+  wasm_hash : opt text;
+};
+type BundleFile = record {
+  total_chunks : nat32;
+  path : text;
+  size : nat64;
+  content_type : text;
+};
+type BundleMeta = record {
+  files : vec BundleFile;
+  permissions : BundlePermissions;
+  module_id : text;
+  sha256 : text;
+  installed_at : nat64;
+  size_bytes : nat64;
+  version : text;
+};
+type BundlePermissions = record {
+  uses_crypto : bool;
+  http_outcall_hosts : vec text;
+  storage_namespaces : vec text;
+  uses_timer : bool;
+  inter_canister : vec text;
+};
+// # Canister Status Type
+// 
+// Status of a canister.
+// 
+// See [`CanisterStatusResult::status`].
+type CanisterStatusType = variant {
+  // The canister is stopped.
+  stopped;
+  // The canister is stopping.
+  stopping;
+  // The canister is running.
+  running;
+};
+// Config della consegna outbound: a QUALE canale `__secrets` (URL d'uscita) e dopo quanto silenzio,
+// con flag fire-once. Self-contenuta (non dipende da `ReleaseConfig`, che è il path inbound) →
+// la Fase 4 può rimuovere l'inbound senza toccare questo.
+type DeliveryConfig = record {
+  window_secs : nat64;
+  delivered : bool;
+  channel : text;
+};
+// Contesto di derivazione — determina l'input per VetKeys.
+type DerivationContext = variant {
+  // Chiave condivisa per conversazione con un peer.
+  // Ordine canonico: min(owner, peer) + max(owner, peer) → stessa chiave per entrambi.
+  PeerConversation : record { peer : principal };
+  // Chiave per dato archiviato (equivalente al file_id del vault).
+  StoredData : record { data_id : text };
+  // Contesto libero per capability future.
+  Custom : record { context : blob };
+};
+// Guardia booleana singola (NON un interprete): `field` riferisce `stepN[.campo]`, confrontato
+// con `value` tramite `op`. Operatori: `== != > >= < <= contains`.
+type Guard = record { op : text; field : text; value : text };
+// # HTTP Header.
+// 
+// Represents a HTTP header.
+// 
+// See [`HttpRequestArgs::headers`] and [`HttpRequestResult::headers`].
+type HttpHeader = record {
+  // Value of the header.
+  value : text;
+  // Name of the header.
+  name : text;
+};
+type HttpRequest = record {
+  url : text;
+  method : text;
+  body : blob;
+  headers : vec record { text; text };
+};
+// # HTTP Request Result
+// 
+// Result type of [`http_request`](https://internetcomputer.org/docs/current/references/ic-interface-spec/#ic-http_request).
+type HttpRequestResult = record {
+  // The response status (e.g. 200, 404).
+  status : nat;
+  // The response’s body.
+  body : blob;
+  // List of HTTP response headers and their corresponding values.
+  headers : vec HttpHeader;
+};
+type HttpResponse = record {
+  body : blob;
+  headers : vec record { text; text };
+  upgrade : opt bool;
+  status_code : nat16;
+};
+// Un job = sequenza dichiarata di azioni sotto i permessi del bundle proprietario.
+// 
+// Semantica della guardia (una sola, niente branching): gli step si eseguono in ordine
+// accumulando output; se `guard` è presente viene valutata **dopo aver eseguito lo step a cui
+// fa riferimento** (prefisso = indice `stepN` citato + 1). Se **falsa**, gli step rimanenti
+// (l'effetto) sono **saltati** e l'esito è `Skipped`. Senza guardia: tutti gli step eseguiti.
+type Job = record {
+  // Etichetta umana per il Feed-home (F5): il *racconto* dell'agente ("Watch my websites")
+  // invece dell'opaco `job_id`. **Campo additivo `Option`** (forward-compat candid: i Job già
+  // salvati senza questo campo decodificano con `None`) → **nessun nuovo MemId, nessun freeze**:
+  // vive dentro lo struct già in `AUTO_JOBS_MEM` (90). Il giudizio editoriale del Feed resta
+  // DERIVATO (status/external/guard/capsula), non dichiarato: niente tassonomia/`kind` (anti-DSL).
+  title : opt text;
+  actions : vec Action;
+  job_id : text;
+  guard : opt Guard;
+  owning_bundle : opt text;
+};
+// Esito di un'esecuzione (per endpoint + status).
+type JobOutcome = variant { Skipped; Completed };
+type Result = variant { Ok; Err : text };
+type Result_1 = variant { Ok : text; Err : text };
+type Result_2 = variant { Ok : BundleMeta; Err : text };
+type Result_3 = variant { Ok : opt blob; Err : text };
+type Result_4 = variant { Ok : vec text; Err : text };
+type Result_5 = variant { Ok : principal; Err : text };
+type Result_6 = variant { Ok : Status; Err : text };
+type Result_7 = variant { Ok : JobOutcome; Err : text };
+// Schedule persistente. `next_run_secs` ri-letto dallo stable ad ogni tick → niente timer in-memory.
+type Schedule = record {
+  next_run_secs : nat64;
+  interval_secs : nat64;
+  job_id : text;
+  schedule_id : text;
+};
+// Credenziale come la vede l'owner: nome + valore mascherato (mai il chiaro).
+type SecretInfo = record { name : text; masked : text };
+// Stato runtime del canister (cicli/memoria/controllers), esposto da
+// `platform_status`. **Sovranita' ≠ opacita':** i campi sono `Option` per
+// permettere la **redazione per-campo** ai chiamanti non autorizzati (stesso
+// principio di `app_metadata_for`, che mette i principal a `None`). Regole:
+// 
+// - `module_hash`: MAI redatto (invariante di verificabilita': nasconderlo non
+// protegge il proprietario, toglie a chi interagisce con lui la verifica del
+// codice). `None` solo se il canister e' vuoto.
+// - `controllers`: viewer-gated SEMPRE (unico campo correlante). `None` per i
+// non-viewer.
+// - `status`/`cycles`/`memory_size`/`freezing_threshold`: pubblici per default;
+// `None` per i non-viewer SOLO se `private_ops` e' acceso (opacita' sovrana
+// senza danno a terzi).
+type Status = record {
+  status : opt CanisterStatusType;
+  freezing_threshold : opt nat;
+  controllers : opt vec principal;
+  memory_size : opt nat;
+  cycles : opt nat;
+  module_hash : opt blob;
+};
+// # Transform Args.
+// 
+// ```text
+// record {
+// response : http_response;
+// context : blob;
+// }
+// ```
+// 
+// See [`TransformContext`].
+type TransformArgs = record {
+  // Context for response transformation
+  context : blob;
+  // Raw response from remote service, to be transformed
+  response : HttpRequestResult;
+};
+service : (principal, principal) -> {
+  allow_claim : () -> (Result);
+  app_version : () -> (text) query;
+  automation_log : () -> (vec text) query;
+  // Timbra la presenza dell'owner col tempo del canister (secondi). Owner-gated (fail-closed).
+  // Ignora qualsiasi valore del client: il *quando* lo decide il server.
+  checkin : () -> (Result);
+  claim_user_principal : () -> (Result);
+  // Svuota tutti gli asset prima di ricaricare un bundle frontend nuovo (self-upgrade §B).
+  clear_assets : () -> (Result);
+  // Disarma la consegna outbound (cancella la config). Owner-gated. Idempotente.
+  clear_delivery_config : () -> (Result);
+  create_job : (Job) -> (Result);
+  delete_job : (text) -> (Result);
+  // Revoca (cancella) una credenziale. Owner-gated. Idempotente.
+  delete_secret : (text) -> (Result);
+  derive_encrypted_key : (text, DerivationContext, blob) -> (Result_1);
+  finalize_assets : () -> (Result);
+  // Config di consegna corrente (owner). Per la Control Room.
+  get_delivery_config : () -> (opt DeliveryConfig) query;
+  get_owner : () -> (principal) query;
+  get_user_principal : () -> (opt principal) query;
+  get_verification_key : (text) -> (Result_1);
+  http_request : (HttpRequest) -> (HttpResponse) query;
+  http_request_update : (HttpRequest) -> (HttpResponse);
+  install_bundle : (text, blob, text, text, BundlePermissions) -> (Result_2);
+  job_status : (text) -> (opt text) query;
+  kv_delete : (text, text) -> (Result);
+  kv_delete_as : (Actor, text, text) -> (Result);
+  kv_get : (text, text) -> (opt blob) query;
+  kv_get_as : (Actor, text, text) -> (Result_3) query;
+  kv_list : (text) -> (vec text) query;
+  kv_list_as : (Actor, text) -> (Result_4) query;
+  kv_set : (text, text, blob) -> (Result);
+  kv_set_as : (Actor, text, text, blob) -> (Result);
+  // Ultimo battito registrato (secondi), se presente. Per la Control Room/frontend.
+  last_checkin : () -> (opt nat64) query;
+  list_bundles : () -> (vec BundleMeta) query;
+  list_jobs : () -> (vec Job) query;
+  list_schedules : () -> (vec Schedule) query;
+  // Elenca le credenziali (nomi + mascherato). Owner-gated. Mai il chiaro.
+  list_secrets : () -> (vec SecretInfo) query;
+  platform_add_controller : (principal) -> (Result);
+  platform_claim : (blob) -> (Result_5);
+  platform_cycles : () -> (nat) query;
+  platform_eject : (bool) -> (Result);
+  platform_get_admin : () -> (opt principal) query;
+  platform_get_tier : () -> (nat8) query;
+  platform_init_admin : (principal) -> (Result);
+  platform_is_standalone : () -> (bool) query;
+  platform_metadata : () -> (AppMetadata) query;
+  platform_remove_controller : (principal) -> (Result);
+  platform_remove_portal : () -> (Result);
+  platform_set_portal_owner : (principal) -> (Result);
+  platform_set_private_ops : (bool) -> (Result);
+  platform_set_status_viewers : (vec principal) -> (Result);
+  platform_set_tier : (nat8, opt nat64) -> (Result);
+  platform_status : () -> (Result_6);
+  run_job_now : (text) -> (Result_7);
+  schedule_job : (text, nat64) -> (Result_1);
+  // Owner arma la consegna outbound: canale d'uscita + finestra di silenzio. Owner-gated, fail-closed.
+  // Il canale deve già esistere in `__secrets` (registralo con `set_secret` prima). Riarmo: azzera
+  // sempre `delivered` (ogni (ri)configurazione è una nuova promessa di consegna).
+  set_delivery_config : (text, nat64) -> (Result);
+  // Owner deposita l'envelope cifrato (modello vault). Owner-gated. Sostituisce il precedente.
+  // **Re-seal ⇒ ri-arma il push outbound:** azzera il flag `delivered` della delivery-config (se
+  // presente) così una capsula nuova viene riconsegnata al prossimo silenzio (fire-once per envelope).
+  set_release_capsule : (blob) -> (Result);
+  // Registra/aggiorna una credenziale d'uscita. Owner-gated.
+  set_secret : (text, text) -> (Result);
+  // Transform per gli HTTP outcall (azione `Http` di cap-automation, F3b): canonicalizza la risposta
+  // per il consenso fra nodi — tiene status+body, **scarta tutti gli header** (i non-deterministici
+  // come Date romperebbero il consenso). Referenziata per nome ("transform") nella richiesta.
+  transform : (TransformArgs) -> (HttpRequestResult) query;
+  uninstall_bundle : (text) -> (Result);
+  unschedule : (text) -> (Result);
+  upload_asset : (text, text, blob) -> (Result);
+  upload_asset_batch : (vec record { text; text; blob }) -> (Result);
+}

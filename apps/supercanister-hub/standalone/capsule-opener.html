@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Time Capsule — Standalone Opener</title>
+<!--
+  capsule-opener.html — the heir's offline opener for an EasyHub Time Capsule.
+
+  WHAT IT IS. A single, hand-written, fully offline HTML page. No build step, no
+  frameworks, no network requests, no external files. Everything that runs is in
+  this file — open "View source" and read it. It uses only the browser's native
+  WebCrypto (PBKDF2 + AES-GCM). Zero dependencies.
+
+  WHAT IT DOES. A sealed capsule was delivered to you on a channel (a webhook).
+  Paste it (or load it as a file) together with the passphrase you were given
+  separately. The page reconstructs, entirely in your browser:
+    · a text message  → shown on screen, or
+    · a file of any format → rebuilt with its original name/type, ready to save.
+  Nothing you type is ever sent anywhere. For peace of mind: disconnect from the
+  internet first, then paste the passphrase.
+
+  FORMAT (frozen, v:1). The delivered envelope is JSON-UTF8:
+    { v:1, method:'passphrase',
+      kdf:{ algo:'PBKDF2-SHA256', salt:<base64>, iter:N },
+      ct:<base64 of the inner binary envelope> }
+  inner binary (base64-decoded ct): [ version:1 (1B) | nonce:12B | ciphertext+tag(16B) ]
+  plaintext (after AES-GCM):
+    · starts with FILE_MAGIC "ECF1" → a file:
+        MAGIC(4) | headerLen:u32 little-endian(4) | header JSON {name,mime} | raw bytes
+    · otherwise → a plain UTF-8 text message (legacy capsule, no framing).
+  This mirrors shared/src/core/crypto.js byte-for-byte. A round-trip test
+  (shared/src/core/capsule-opener.roundtrip.test.js) seals with that module and
+  opens with the very script below, so any format drift breaks the build.
+-->
+<style>
+  :root {
+    --bg: #0f172a; --card: #1e293b; --ink: #e2e8f0; --muted: #94a3b8;
+    --line: #334155; --accent: #38bdf8; --ok: #4ade80; --err: #f87171;
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 2rem 1rem; background: var(--bg); color: var(--ink);
+    font: 16px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  }
+  main { max-width: 720px; margin: 0 auto; }
+  h1 { font-size: 1.6rem; margin: 0 0 .3rem; }
+  .lede { color: var(--muted); margin: 0 0 1.5rem; }
+  .card {
+    background: var(--card); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 1.25rem; margin-bottom: 1.25rem;
+  }
+  .field { display: block; margin-bottom: 1rem; }
+  .field > span { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .35rem; }
+  textarea, input[type="text"], input[type="password"] {
+    width: 100%; background: #0b1220; color: var(--ink); border: 1px solid var(--line);
+    border-radius: 10px; padding: .65rem .75rem; font-size: .95rem;
+  }
+  textarea { resize: vertical; min-height: 120px; }
+  .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  input[type="file"] { color: var(--muted); }
+  .or { text-align: center; color: var(--muted); font-size: .8rem; margin: .25rem 0 1rem; letter-spacing: .04em; }
+  button {
+    background: var(--accent); color: #08131f; border: 0; border-radius: 10px;
+    padding: .6rem 1.1rem; font-size: .95rem; font-weight: 600; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--accent); border: 1px solid var(--line); }
+  button:disabled { opacity: .55; cursor: default; }
+  .actions { display: flex; gap: .6rem; flex-wrap: wrap; align-items: center; }
+  .banner {
+    border: 1px solid var(--line); border-left: 3px solid var(--accent);
+    border-radius: 10px; padding: .8rem 1rem; margin-bottom: 1.5rem; background: #0b1220;
+    font-size: .9rem; color: var(--muted);
+  }
+  .banner b { color: var(--ink); }
+  .net { font-weight: 600; }
+  .net.online { color: var(--err); }
+  .net.offline { color: var(--ok); }
+  .hint { font-size: .8rem; color: var(--muted); margin: .5rem 0 0; }
+  .out { margin-top: 1rem; }
+  .result { border: 1px solid var(--line); border-radius: 10px; padding: 1rem; background: #0b1220; }
+  .result .tag { color: var(--ok); font-weight: 600; margin-bottom: .6rem; }
+  .result pre {
+    white-space: pre-wrap; word-break: break-word; margin: 0 0 .8rem;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .9rem;
+  }
+  .error { color: var(--err); }
+  a.download { color: var(--accent); font-weight: 600; }
+  footer { color: var(--muted); font-size: .78rem; text-align: center; margin-top: 2rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>Open a Time Capsule</h1>
+  <p class="lede">A sealed message or file was left for you. Open it here — entirely in your browser.</p>
+
+  <div class="banner">
+    For full peace of mind, <b>disconnect from the internet</b>, then paste the passphrase.
+    This page never contacts anyone — it makes no network requests of any kind.
+    Network right now: <span id="net" class="net">checking…</span>.
+  </div>
+
+  <div class="card">
+    <label class="field">
+      <span>The sealed capsule — paste the block you received (starts with <span class="mono">{"v":1,…}</span>)</span>
+      <textarea id="env" class="mono" placeholder='{"v":1,"method":"passphrase","kdf":{…},"ct":"…"}'></textarea>
+    </label>
+    <p class="or">— or load it as a file —</p>
+    <label class="field">
+      <span>Load the capsule from a file (the webhook message saved to disk)</span>
+      <input type="file" id="envFile">
+    </label>
+    <label class="field">
+      <span>The passphrase — given to you separately, out-of-band</span>
+      <input type="text" id="pass" class="mono" placeholder="Paste the passphrase the sender gave you">
+    </label>
+    <div class="actions">
+      <button id="open">Open the capsule</button>
+    </div>
+    <div id="out" class="out"></div>
+  </div>
+
+  <p class="hint">
+    The passphrase and the capsule reach you through two separate channels on purpose: the capsule rides a
+    delivery webhook, the passphrase comes to you directly. One without the other reveals nothing.
+  </p>
+
+  <footer>
+    Hand-written, offline, zero dependencies. WebCrypto only (PBKDF2 + AES-GCM). What you see is what runs.
+  </footer>
+</main>
+
+<!--
+  CAPSULE CORE — pure crypto, no DOM. Kept in its own script so the round-trip
+  test can extract and run THIS EXACT code headless (node:vm), proving format
+  parity with shared/src/core/crypto.js. Do not reference the DOM here.
+-->
+<script id="capsule-core">
+"use strict";
+(function (root) {
+  // "ECF1" = EasyCapsule File v1 — distinguishes a sealed file from a legacy text capsule.
+  var FILE_MAGIC = [0x45, 0x43, 0x46, 0x31];
+  var VERSION_V1 = 0x01;
+  var NONCE_LEN = 12;
+  var PBKDF2_ALGO = "PBKDF2-SHA256";
+  var METHOD_PASSPHRASE = "passphrase";
+
+  function fromB64(b64) {
+    var s = atob(b64);
+    var out = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+
+  function parseMethodEnvelope(envBytes) {
+    if (!(envBytes instanceof Uint8Array)) throw new Error("envelope must be bytes");
+    var env;
+    try {
+      env = JSON.parse(new TextDecoder().decode(envBytes));
+    } catch (e) {
+      throw new Error("not-an-envelope");
+    }
+    if (!env || typeof env !== "object" || env.v !== 1 || typeof env.method !== "string") {
+      throw new Error("not-an-envelope");
+    }
+    return env;
+  }
+
+  // Read the sealing method WITHOUT decrypting, so the UI can reject unsupported
+  // strategies (vetkeys/subnetkey) before asking for the passphrase.
+  function readMethod(envBytes) {
+    return parseMethodEnvelope(envBytes).method;
+  }
+
+  async function deriveKeyFromPassphrase(passphrase, salt, iterations) {
+    var baseKey = await crypto.subtle.importKey(
+      "raw", new TextEncoder().encode(passphrase),
+      { name: "PBKDF2" }, false, ["deriveKey"]);
+    return crypto.subtle.deriveKey(
+      { name: "PBKDF2", salt: salt, iterations: iterations, hash: "SHA-256" },
+      baseKey,
+      { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+  }
+
+  // inner binary envelope: [ version:1 | nonce:12 | ciphertext+tag ]
+  async function decryptInner(envelope, key) {
+    if (envelope.length < 1 + NONCE_LEN + 16) throw new Error("inner envelope too short");
+    if (envelope[0] !== VERSION_V1) throw new Error("unsupported inner version " + envelope[0]);
+    var nonce = envelope.subarray(1, 1 + NONCE_LEN);
+    var ct = envelope.subarray(1 + NONCE_LEN);
+    var pt = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce }, key, ct);
+    return new Uint8Array(pt);
+  }
+
+  function hasMagic(bytes) {
+    if (bytes.length < FILE_MAGIC.length) return false;
+    for (var i = 0; i < FILE_MAGIC.length; i++) if (bytes[i] !== FILE_MAGIC[i]) return false;
+    return true;
+  }
+
+  // plaintext file framing: MAGIC(4) | headerLen:u32 LE(4) | header JSON {name,mime} | raw bytes
+  function unframe(plaintext) {
+    var off = FILE_MAGIC.length;
+    if (plaintext.length < off + 4) throw new Error("sealed file corrupt (too short)");
+    var headerLen = new DataView(plaintext.buffer, plaintext.byteOffset + off, 4).getUint32(0, true);
+    var headerStart = off + 4;
+    var headerEnd = headerStart + headerLen;
+    if (headerEnd > plaintext.length) throw new Error("sealed file corrupt (header length out of range)");
+    var meta;
+    try {
+      meta = JSON.parse(new TextDecoder().decode(plaintext.subarray(headerStart, headerEnd)));
+    } catch (e) {
+      throw new Error("sealed file corrupt (header not JSON)");
+    }
+    return {
+      name: (meta && typeof meta.name === "string") ? meta.name : "",
+      mime: (meta && typeof meta.mime === "string") ? meta.mime : "",
+      bytes: plaintext.slice(headerEnd), // copy: do not retain the plaintext buffer
+    };
+  }
+
+  // openEnvelope(envBytes, passphrase) ->
+  //   { kind:'text', text }  |  { kind:'file', name, mime, bytes }
+  // Throws "unsupported-method:<m>" for non-passphrase strategies, "not-an-envelope"
+  // for a malformed block, and a generic decrypt error for a wrong passphrase /
+  // tampered envelope (AES-GCM authenticates).
+  async function openEnvelope(envBytes, passphrase) {
+    var env = parseMethodEnvelope(envBytes);
+    if (env.method !== METHOD_PASSPHRASE) throw new Error("unsupported-method:" + env.method);
+    if (!env.kdf || env.kdf.algo !== PBKDF2_ALGO) throw new Error("unsupported kdf algo");
+    var iterations = env.kdf.iter;
+    if (!(Number.isInteger(iterations) && iterations > 0)) throw new Error("invalid kdf.iter");
+    var salt = fromB64(env.kdf.salt);
+    var key = await deriveKeyFromPassphrase(passphrase, salt, iterations);
+    var plaintext = await decryptInner(fromB64(env.ct), key);
+    if (hasMagic(plaintext)) {
+      var f = unframe(plaintext);
+      return { kind: "file", name: f.name, mime: f.mime, bytes: f.bytes };
+    }
+    return { kind: "text", text: new TextDecoder().decode(plaintext) };
+  }
+
+  root.CapsuleCore = {
+    openEnvelope: openEnvelope,
+    readMethod: readMethod,
+    // exposed for tests / inspection
+    fromB64: fromB64,
+    parseMethodEnvelope: parseMethodEnvelope,
+    FILE_MAGIC: FILE_MAGIC,
+  };
+})(typeof globalThis !== "undefined" ? globalThis : this);
+</script>
+
+<!-- DOM WIRING — uses CapsuleCore; never touched by the round-trip test. -->
+<script>
+"use strict";
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var envEl = $("env"), fileEl = $("envFile"), passEl = $("pass"),
+      openBtn = $("open"), outEl = $("out"), netEl = $("net");
+
+  // Network indicator — purely informative; the page never makes requests.
+  function paintNet() {
+    var online = navigator.onLine;
+    netEl.textContent = online ? "online" : "offline";
+    netEl.className = "net " + (online ? "online" : "offline");
+  }
+  paintNet();
+  window.addEventListener("online", paintNet);
+  window.addEventListener("offline", paintNet);
+
+  function clearOut() { outEl.replaceChildren(); }
+  function showError(msg) {
+    clearOut();
+    var p = document.createElement("p");
+    p.className = "error";
+    p.textContent = msg;
+    outEl.appendChild(p);
+  }
+
+  // Read the envelope text from the textarea, or (if empty) from the chosen file.
+  // The delivered envelope is UTF-8 JSON, so a saved file is read as text.
+  function readEnvelopeText() {
+    return new Promise(function (resolve, reject) {
+      var pasted = envEl.value.trim();
+      if (pasted) { resolve(pasted); return; }
+      var file = fileEl.files && fileEl.files[0];
+      if (!file) { reject(new Error("Paste the sealed capsule, or load it from a file.")); return; }
+      var reader = new FileReader();
+      reader.onload = function () { resolve(String(reader.result || "").trim()); };
+      reader.onerror = function () { reject(new Error("That file could not be read.")); };
+      reader.readAsText(file);
+    });
+  }
+
+  function renderText(text) {
+    clearOut();
+    var box = document.createElement("div");
+    box.className = "result";
+    var tag = document.createElement("div");
+    tag.className = "tag";
+    tag.textContent = "🔓 Opened — message";
+    var pre = document.createElement("pre");
+    pre.textContent = text;
+    var copy = document.createElement("button");
+    copy.className = "ghost";
+    copy.textContent = "Copy message";
+    copy.onclick = function () {
+      if (navigator.clipboard) navigator.clipboard.writeText(text);
+    };
+    box.appendChild(tag); box.appendChild(pre); box.appendChild(copy);
+    outEl.appendChild(box);
+  }
+
+  function renderFile(res) {
+    clearOut();
+    var box = document.createElement("div");
+    box.className = "result";
+    var tag = document.createElement("div");
+    tag.className = "tag";
+    tag.textContent = "🔓 Opened — file";
+    var name = res.name || "capsule.bin";
+    var mime = res.mime || "application/octet-stream";
+    var info = document.createElement("p");
+    info.className = "hint";
+    info.textContent = name + " · " + mime + " · " + res.bytes.length + " bytes";
+    var blob = new Blob([res.bytes], { type: mime });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement("a");
+    a.className = "download";
+    a.href = url;
+    a.download = name;
+    a.textContent = "⬇ Download " + name;
+    box.appendChild(tag); box.appendChild(a); box.appendChild(info);
+    outEl.appendChild(box);
+  }
+
+  openBtn.onclick = async function () {
+    clearOut();
+    var passphrase = passEl.value;
+    var envText;
+    try {
+      envText = await readEnvelopeText();
+    } catch (e) {
+      showError(e.message);
+      return;
+    }
+    if (!passphrase) { showError("Paste the passphrase the sender gave you."); return; }
+
+    var envBytes = new TextEncoder().encode(envText);
+
+    // Recognise the method before asking WebCrypto to do anything.
+    var method;
+    try {
+      method = CapsuleCore.readMethod(envBytes);
+    } catch (e) {
+      showError("This does not look like a sealed capsule. Paste the exact block you received, including the outer { }.");
+      return;
+    }
+    if (method !== "passphrase") {
+      showError("This capsule uses the “" + method + "” method, which this opener can’t handle. It was sealed with a different strategy.");
+      return;
+    }
+
+    openBtn.disabled = true;
+    var label = openBtn.textContent;
+    openBtn.textContent = "Opening…";
+    try {
+      var res = await CapsuleCore.openEnvelope(envBytes, passphrase);
+      if (res.kind === "file") renderFile(res);
+      else renderText(res.text);
+    } catch (e) {
+      var m = String(e && e.message || "");
+      if (m.indexOf("unsupported-method:") === 0) {
+        showError("This capsule was sealed with a strategy this opener can’t handle.");
+      } else {
+        // AES-GCM failure = wrong passphrase or a tampered/incomplete envelope.
+        showError("Could not open it. Check the passphrase character-for-character, and make sure the capsule is complete and unaltered.");
+      }
+    } finally {
+      openBtn.disabled = false;
+      openBtn.textContent = label;
+    }
+  };
+})();
+</script>
+</body>
+</html>
