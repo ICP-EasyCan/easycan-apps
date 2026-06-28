@@ -1,0 +1,13 @@
+{
+  "app": "supercanister-hub",
+  "version": "0.1.0",
+  "min_compatible_version": "0.1.0",
+  "wasm_url": "https://raw.githubusercontent.com/ICP-EasyCan/easycan-apps/dist/supercanister-hub/0.1.0/hub_canister.wasm",
+  "wasm_sha256": "bf908b73be0ab53774a41c63c133c933c88b720c9afbab2d623845215533d2c6",
+  "frontend_url": "https://raw.githubusercontent.com/ICP-EasyCan/easycan-apps/dist/supercanister-hub/0.1.0/frontend.tar.gz",
+  "frontend_sha256": "f4d75d6c6bf19de3da73edc9c19e4f1d17cae3cb4f12310253a03513cc4ddd20",
+  "released_at": "2026-06-28T13:02:53Z",
+  "source_commit": "172f4ae23c510432bb8b63d0088158402c95f450",
+  "release_tag": "supercanister-hub-v0.1.0",
+  "notes": "Release supercanister-hub-v0.1.0. Verify: docs/build/REPRODUCIBLE_BUILD.md"
+}

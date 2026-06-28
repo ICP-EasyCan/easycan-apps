@@ -1,0 +1,13 @@
+{
+  "app": "vault",
+  "version": "0.2.0",
+  "min_compatible_version": "0.1.0",
+  "wasm_url": "https://raw.githubusercontent.com/ICP-EasyCan/easycan-apps/dist/vault/0.2.0/vault_canister.wasm",
+  "wasm_sha256": "12ba22b4539b01b0d054678fffdd4a082ffb2f5e5bc8d60e60a4a8ed4090b397",
+  "frontend_url": "https://raw.githubusercontent.com/ICP-EasyCan/easycan-apps/dist/vault/0.2.0/frontend.tar.gz",
+  "frontend_sha256": "c7ce4746c6ee51a522dd0eb04a9c981aa56097c52760420d632cc3829f8c53c6",
+  "released_at": "2026-06-14T19:40:23Z",
+  "source_commit": "7504b30cd7aec7e6bc9ec853c7369735239a09b2",
+  "release_tag": "vault-v0.2.0",
+  "notes": "Local publish-dist of vault-v0.2.0 (base/latest, no immutable release)."
+}
