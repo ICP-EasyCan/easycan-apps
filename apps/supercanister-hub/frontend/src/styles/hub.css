@@ -333,17 +333,21 @@ textarea { resize: vertical; min-height: 70px; font-family: var(--font-mono); }
 .topbar { display: flex; align-items: center; gap: 1rem; padding: 0.25rem 0 1rem; }
 .topbar-title { font-weight: 700; font-size: 1.6rem; flex: 1; color: var(--text); }
 .settings-content { display: flex; flex-direction: column; }
-.settings-section { padding: 1.1rem 0; border-bottom: 1px solid var(--border-subtle); }
+/* Valori allineati a @shared/styles/base.css (vault/messenger): la pagina è renderizzata
+ * dalla capability condivisa, qui solo i token visivi. Padding orizzontale 0 perché il
+ * contenitore .app-content fornisce già 1rem laterale (a differenza di vault). */
+.settings-section { padding: 1.25rem 0; border-bottom: 1px solid var(--border); }
 .settings-section:last-child { border-bottom: none; }
 .settings-section h3 {
-  font-size: 0.78rem; color: var(--text-muted); text-transform: uppercase;
+  font-size: 0.85rem; color: var(--text-muted); text-transform: uppercase;
   letter-spacing: 0.05em; margin: 0 0 0.75rem;
 }
-.settings-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.65rem; }
+.settings-row { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
 .settings-row:last-child { margin-bottom: 0; }
 .settings-label { font-weight: 600; font-size: 0.85rem; color: var(--text-muted); min-width: 90px; flex-shrink: 0; }
-.settings-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.85rem; }
-.settings-note { margin: 0 0 0.6rem; line-height: 1.5; }
+.settings-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 0.82rem; }
+.settings-note { margin: 0 0 0.75rem; line-height: 1.5; }
+.settings-note:last-child { margin-bottom: 0; }
 .small { font-size: 0.82rem; }
 .btn-icon {
   background: transparent; border: none; cursor: pointer; font-size: 1.05rem;
@@ -359,6 +363,44 @@ textarea { resize: vertical; min-height: 70px; font-family: var(--font-mono); }
   flex-shrink: 0; transition: background 0.15s ease, border-color 0.15s ease;
 }
 .copy-btn:hover { background: #252a35; border-color: var(--text-muted); }
+
+/* ─── Pagine #verify e #update (catena di fiducia) ─────────────────────────────
+ * Portate da @shared/styles/base.css (vault/messenger) e adattate ai token di hub.
+ * Verde/rosso dei badge identici alle altre app: l'esito della verifica deve avere
+ * lo stesso linguaggio visivo ovunque. */
+.settings-row-stacked { flex-direction: column; align-items: stretch; gap: 0.3rem; }
+.verify-hash {
+  display: block; font-family: var(--font-mono);
+  font-size: 0.78rem; line-height: 1.4; word-break: break-all;
+  padding: 0.5rem 0.6rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-elev-2, rgba(255,255,255,0.03)); cursor: text;
+}
+.verify-code {
+  font-family: var(--font-mono);
+  font-size: 0.75rem; line-height: 1.5; white-space: pre-wrap; word-break: break-all;
+  padding: 0.6rem 0.7rem; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--bg-elev-2, rgba(255,255,255,0.03)); margin: 0.4rem 0 0;
+}
+.verify-match-ok, .verify-match-bad { font-size: 0.85rem; font-weight: 600; margin: 0.5rem 0 0; }
+.verify-match-ok { color: #16a34a; }
+.verify-match-bad { color: #dc2626; }
+
+.update-status-ok, .update-status-new { font-size: 0.95rem; font-weight: 600; margin: 0.25rem 0 0; }
+.update-status-ok { color: #16a34a; }
+.update-status-new { color: var(--accent-2, #f7b13d); }
+
+.update-log { margin-top: 0.5rem; }
+.update-log p { margin: 0.15rem 0; font-family: var(--font-mono, monospace); font-size: 0.82rem; }
+
+.update-snapshots { margin-top: 0.5rem; }
+.update-snapshot-row { align-items: center; }
+.update-snapshot-meta { display: flex; flex-direction: column; gap: 0.1rem; }
+.update-snapshot-actions { display: flex; gap: 0.4rem; }
+
+.update-autorollback { align-items: center; gap: 0.4rem; cursor: pointer; }
+.update-autorollback input { margin: 0; }
+
+.settings-divider { border: none; border-top: 1px solid var(--border); margin: 0.85rem 0; }
 
 /* ─── Time Capsule (owner) ─────────────────────────────────────────────────── */
 

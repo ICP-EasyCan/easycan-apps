@@ -13,7 +13,7 @@ import { initAuth, logout, isAuthenticated, getPrincipalText, getPrincipal }
                                from '@shared/core/auth.js';
 import { setDefaultIdlFactory, call, query, setOwnCanisterId }
                                from '@shared/core/icp.js';
-import { handleDeepLinkClaim } from '@shared/core/claim.js';
+import { handleDeepLinkClaim, isClaimPending } from '@shared/core/claim.js';
 import { $ }                   from '@shared/ui/dom.js';
 import { route, fallback, startRouter, navigate }
                                from '@shared/ui/router.js';
@@ -101,9 +101,32 @@ async function boot() {
 
   // ─── Auth events ────────────────────────────────────────────────────────────
   bus.on('auth:login', async () => {
-    setOwnCanisterId(CANISTER_ID);
     // #decrypt è un tool client-side puro: chi vi atterra (anche autenticato) ci resta, niente gate.
     if (window.location.hash.startsWith('#decrypt')) { renderCapsuleDecrypt(routeContainer); return; }
+
+    // Overlay onesto sulla login-card mentre registriamo/verifichiamo la proprietà (gemello di
+    // apps/vault e apps/messenger). Testo "registro la proprietà" solo se un claim sta davvero per
+    // partire (acquisto fresh); al re-login/post-reinstall l'owner è già settato → si VERIFICA soltanto.
+    const loginCard = document.querySelector('.login-card');
+    if (loginCard) {
+      const claiming = isClaimPending();
+      const title    = claiming ? 'Configuring App' : 'Signing in';
+      const detail   = claiming ? 'Registering your ownership on the blockchain...'
+                                : 'Verifying your ownership...';
+      loginCard.innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; animation: fadeIn 0.4s ease-out;">
+          <div style="display: inline-block; width: 28px; height: 28px; border: 3px solid var(--accent-dim, rgba(61, 219, 217, 0.15)); border-top-color: var(--accent, #3ddbd9); border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 20px;"></div>
+          <h3 style="margin: 0 0 10px 0; font-weight: 600; font-size: 1.15em; color: var(--text);">${title}</h3>
+          <p style="margin: 0; font-size: 0.95em; opacity: 0.7; color: var(--text);">${detail}</p>
+        </div>
+        <style>
+          @keyframes spin { to { transform: rotate(360deg); } }
+          @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        </style>
+      `;
+    }
+
+    setOwnCanisterId(CANISTER_ID);
     try {
       const { claimed } = await handleDeepLinkClaim(CANISTER_ID, { source: 'login' });
       if (!claimed) await claimIfNeeded();
