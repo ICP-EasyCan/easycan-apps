@@ -204,6 +204,18 @@ button.small { padding: 0.3rem 0.7rem; font-size: 0.85em; }
 .update-autorollback { align-items: center; gap: 0.4rem; cursor: pointer; }
 .update-autorollback input { margin: 0; }
 
+/* Gate backup-key pre-upgrade (#update, Fase 2 canister_recovery). */
+.update-backup-warn {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--accent-2, #f7b13d);
+  border-radius: 0.5rem;
+}
+.update-backup-warn .settings-row { margin-top: 0.4rem; }
+.update-backup-warn label { align-items: center; gap: 0.4rem; cursor: pointer; }
+.update-backup-warn label input { margin: 0; }
+.update-backup-ok { color: #16a34a; font-weight: 600; margin: 0.25rem 0 0; }
+
 .settings-contact {
   display: flex; justify-content: space-between; align-items: center;
   padding: 0.65rem 0;

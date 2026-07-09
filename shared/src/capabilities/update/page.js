@@ -41,7 +41,10 @@ import { el, render } from '../../ui/dom.js';
 import { navigate } from '../../ui/router.js';
 import { query } from '../../core/icp.js';
 import { IS_LOCAL } from '../../core/config.js';
-import { getModuleHash, listSnapshots, deleteSnapshot } from '../../core/management.js';
+import { getModuleHash, listSnapshots, deleteSnapshot, listControllers } from '../../core/management.js';
+import { parseMetadata, deriveBackupKeys } from '../../core/sovereignty.js';
+import { getIdentity } from '../../core/auth.js';
+import { Principal } from '@dfinity/principal';
 import { runUpgrade, rollbackToSnapshot } from './flow.js';
 
 /**
@@ -96,16 +99,19 @@ export async function mountUpdatePage(container, {
 
   const manifestUrl = resolveManifestUrl(repo, app, distBranch);
 
-  // 2. Letture in parallelo, tutte tolleranti (read-only, niente crash).
-  const [current, liveHash, manifest] = await Promise.all([
+  // 2. Letture in parallelo, tutte tolleranti (read-only, niente crash). Il gate
+  //    backup-key (Fase 2 canister_recovery) serve solo dove l'install è abilitato:
+  //    fetchiamo lo stato controller solo lì, altrove è `null` (nessun gate).
+  const [current, liveHash, manifest, backupKey] = await Promise.all([
     readCurrentVersion(canisterId),
     readModuleHash(canisterId),
     fetchManifest(manifestUrl),
+    enableInstall ? readBackupKeyState(canisterId) : Promise.resolve(null),
   ]);
 
   // 3. Render.
   renderPage(container, backRoute, buildSections({
-    canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee,
+    canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee, backupKey,
   }));
 }
 
@@ -126,6 +132,45 @@ async function readModuleHash(canisterId) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Stato "backup key" per il gate pre-upgrade (Fase 2 canister_recovery).
+ *
+ * Una backup key = un controller IC che l'utente possiede altrove (un principal
+ * dfx, una seconda Internet Identity). È l'UNICA via di recovery se un self-upgrade
+ * §B si interrompe e lascia il canister Stopped: la ripartenza richiede un
+ * controller che l'utente controlli già (via NNS/dfx) — il portale non può
+ * auto-nominarsi (cfr. progetti/attivi/canister_recovery). Senza backup key un
+ * upgrade interrotto può diventare irrecuperabile.
+ *
+ * Stesso fetch della pagina sovranità (metadata + controller + admin) + la stessa
+ * L1 `deriveBackupKeys`. Ritorna `{ known, hasBackupKey }`: `known=false` (→ gate
+ * neutro, non blocca) se la lista controller o il metadata non sono leggibili —
+ * su un dubbio non si spaventa e non si sbarra la strada.
+ *
+ * @param {string} canisterId
+ * @returns {Promise<{ known: boolean, hasBackupKey: boolean }>}
+ */
+async function readBackupKeyState(canisterId) {
+  const [metaR, ctrR, adminR] = await Promise.allSettled([
+    query(canisterId, 'platform_metadata'),
+    listControllers(canisterId),
+    query(canisterId, 'platform_get_admin'),
+  ]);
+  if (ctrR.status !== 'fulfilled') return { known: false, hasBackupKey: false };
+  const meta = parseMetadata(metaR.status === 'fulfilled' ? metaR.value : null);
+  if (!meta) return { known: false, hasBackupKey: false };
+  const appAdmin = adminR.status === 'fulfilled'
+    && Array.isArray(adminR.value) && adminR.value.length > 0
+    ? adminR.value[0]
+    : null;
+  const keys = deriveBackupKeys(meta, ctrR.value, {
+    selfPrincipal: Principal.fromText(canisterId),
+    appAdmin,
+    myPrincipal: getIdentity()?.getPrincipal?.() ?? null,
+  });
+  return { known: true, hasBackupKey: keys.length > 0 };
 }
 
 /**
@@ -169,7 +214,7 @@ async function fetchManifest(url) {
 
 // ─── Costruzione sezioni ──────────────────────────────────────────────────────
 
-function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee }) {
+function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee, backupKey }) {
   const sections = [];
   const latest = manifest?.data || null;
 
@@ -223,7 +268,7 @@ function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enabl
   }
 
   // — Sezione: installazione —
-  sections.push(installSection({ canisterId, current, latest, enableInstall, e2ee }));
+  sections.push(installSection({ canisterId, current, latest, enableInstall, e2ee, backupKey }));
 
   // — Sezione: ripristino versione precedente (standalone, indipendente dall'install) —
   const restore = restoreSection({ canisterId, enableInstall, e2ee });
@@ -237,7 +282,7 @@ function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enabl
  * e un update disponibile → bottone che esegue il flusso a 6 passi (flow.js) con log di
  * progresso; al fallimento offre il rollback manuale allo snapshot pre-upgrade.
  */
-function installSection({ canisterId, current, latest, enableInstall, e2ee }) {
+function installSection({ canisterId, current, latest, enableInstall, e2ee, backupKey }) {
   if (!enableInstall) {
     return sectionEl('Install', [
       el('p', { class: 'settings-note small muted' },
@@ -270,7 +315,10 @@ function installSection({ canisterId, current, latest, enableInstall, e2ee }) {
   async function doInstall() {
     const ok = window.confirm(
       'The app will go offline for a few seconds while it restarts. A safety snapshot ' +
-      'is taken first so you can roll back. Continue?');
+      'is taken first so you can roll back.\n\n' +
+      'IMPORTANT: keep this tab open and stay connected until the update finishes. ' +
+      'If the tab closes or the network drops mid-update, the app can be left stopped ' +
+      'and temporarily unreachable.\n\nContinue?');
     if (!ok) return;
     log.replaceChildren();
     setActions(el('button', { class: 'btn-secondary', disabled: true }, 'Updating…'));
@@ -323,10 +371,41 @@ function installSection({ canisterId, current, latest, enableInstall, e2ee }) {
         el('span', { class: 'settings-note small muted' },
           'Roll back automatically if the update fails its health check')));
     if (e2ee) intro.push(e2eeCaveatNote());
-    setActions(el('button', {
+
+    const installBtn = el('button', {
       class: 'btn-primary',
       onclick: doInstall,
-    }, `Install update v${current} → v${latest.version}`));
+    }, `Install update v${current} → v${latest.version}`);
+
+    // Fase 2 gate (canister_recovery): senza una backup key, un upgrade interrotto
+    // può lasciare il canister Stopped e irrecuperabile (la ripartenza richiede un
+    // controller che l'utente possieda già). Non blocchiamo del tutto — esigiamo un
+    // ack esplicito e spingiamo ad aggiungerne una. Se lo stato non è noto (lettura
+    // controller fallita) o una key c'è, nessuna frizione.
+    if (backupKey?.known && !backupKey.hasBackupKey) {
+      installBtn.disabled = true;
+      const ackBox = el('input', { type: 'checkbox' });
+      ackBox.onchange = () => { installBtn.disabled = !ackBox.checked; };
+      intro.push(
+        el('div', { class: 'update-backup-warn' },
+          el('p', { class: 'settings-note small' },
+            '⚠ No backup key set. If this update is interrupted (tab closed or connection ' +
+            'lost mid-upgrade), your canister can be left stopped — and without a backup ' +
+            'controller key you may be unable to restart it. Add one first:'),
+          el('div', { class: 'settings-row' },
+            el('button', {
+              class: 'btn-secondary',
+              onclick: () => navigate('#sovereignty'),
+            }, 'Add a backup key →')),
+          el('label', { class: 'settings-row' },
+            ackBox,
+            el('span', { class: 'settings-note small muted' },
+              'I understand the risk — let me update without a backup key'))));
+    } else if (backupKey?.known && backupKey.hasBackupKey) {
+      intro.push(el('p', { class: 'settings-note small update-backup-ok' },
+        '✓ Backup key present — you can recover this canister if an update is interrupted.'));
+    }
+    setActions(installBtn);
   } else if (updateAvailable) {
     // Update c'è ma il manifest non ha gli URL degli artefatti → non installabile da qui.
     intro.push(el('p', { class: 'settings-note small muted' },

@@ -3,7 +3,12 @@
  *
  * Gemello dello handler di claim (`@shared/core/claim.js`), ma per il CAMBIO-APP. Il
  * portale (unica vetrina + pagamento + seat) rimbalza l'utente all'origin dell'app con
- *   https://<canisterId>.icp0.io?install=<app_id>&token=<hex>
+ *   https://<canisterId>.icp0.io#install=<app_id>&token=<hex>
+ *
+ * Il token viaggia nel FRAGMENT (mai in query string), stessa regola del claim: i
+ * fragment non finiscono nel Referer né nei log dei boundary node. Come per il claim,
+ * l'app DEVE chiamare `captureInstallParams()` sincrono PRIMA di startRouter(), o il
+ * fallback del router riscrive l'hash e distrugge i parametri.
  * Qui, loggati come `P_app_frontend` (= owner = unico controller), si reinstalla l'app
  * richiesta SOPRA quella corrente. Il reinstall AZZERA la stable memory: i dati dell'app
  * uscente si perdono (semantica onesta L2). Nessuna UI di browsing: la scelta è già stata
@@ -40,16 +45,31 @@ const APP_KEY   = 'install:pending-app';
 // ─── Parametri da URL / storage ─────────────────────────────────────────────────
 
 /**
- * Estrae `?install=<app>&token=<hex64>` dall'URL. Ritorna null se assenti o malformati.
+ * Estrae `#install=<app>&token=<hex64>` dal fragment. Ritorna null se assenti o malformati.
  * @returns {{ app: string, tokenHex: string }|null}
  */
 export function getInstallParamsFromUrl() {
-  const params = new URLSearchParams(window.location.search);
+  const hash = window.location.hash.replace(/^#/, '');
+  if (!hash.startsWith('install=')) return null;
+  const params = new URLSearchParams(hash);
   const app = params.get('install');
   const token = params.get('token');
   if (!app || !token) return null;
   if (!/^[0-9a-fA-F]{64}$/.test(token)) return null; // 32-byte hex
   return { app, tokenHex: token.toLowerCase() };
+}
+
+/**
+ * Cattura sincrona dei parametri dal fragment: stash + pulizia URL. DEVE girare
+ * prima di startRouter() (il fallback del router riscriverebbe l'hash).
+ * @returns {boolean} true se i parametri erano nell'URL e sono stati stashati
+ */
+export function captureInstallParams() {
+  const p = getInstallParamsFromUrl();
+  if (!p) return false;
+  stashInstallParams(p);
+  cleanInstallFromUrl();
+  return true;
 }
 
 /** Salva i parametri in sessionStorage (sopravvivono al logout/relogin forzato). */
@@ -80,15 +100,10 @@ export function clearPendingInstall() {
   } catch (_) { /* ignora */ }
 }
 
-/** Rimuove `?install=` e `?token=` dall'URL senza ricaricare. */
+/** Rimuove il fragment `#install=...&token=...` dall'URL senza ricaricare. */
 export function cleanInstallFromUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.delete('install');
-  url.searchParams.delete('token');
-  const clean = url.pathname
-    + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '')
-    + url.hash;
-  window.history.replaceState(null, '', clean);
+  window.history.replaceState(null, '', url.pathname + url.search);
 }
 
 // ─── Esecuzione ─────────────────────────────────────────────────────────────────

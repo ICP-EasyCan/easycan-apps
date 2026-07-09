@@ -118,13 +118,48 @@ fn with_assets_mut<R>(
     })
 }
 
+// ─── Security headers ───────────────────────────────────────────────────────
+
+/// Il claim/install token è una credenziale al portatore nell'URL dell'app:
+/// `no-referrer` garantisce che nessun subresource cross-origin riceva l'URL
+/// nel Referer. Certificato (nel CEL) così un boundary node non può stripparlo.
+const REFERRER_POLICY: &str = "no-referrer";
+
+/// CSP unica per tutte le app servite da core-assets. Copre: bundle Vite self,
+/// WASM client-side (vetkeys) via `wasm-unsafe-eval`, agent IC locale
+/// (127.0.0.1/localhost) e mainnet (ic0.app/icp0.io/icp-api.io), manifest+WASM
+/// del self-upgrade da `raw.githubusercontent.com`, preview file/audio via
+/// blob:. Stile inline usato dalle app → `unsafe-inline` su style-src.
+const CONTENT_SECURITY_POLICY: &str = "default-src 'self'; \
+    script-src 'self' 'wasm-unsafe-eval'; \
+    connect-src 'self' http://localhost:* http://*.localhost:* http://127.0.0.1:* \
+    https://ic0.app https://*.ic0.app https://icp0.io https://*.icp0.io https://icp-api.io \
+    https://raw.githubusercontent.com; \
+    img-src 'self' data: blob:; media-src 'self' blob:; \
+    style-src 'self' 'unsafe-inline'; font-src 'self' data:; \
+    object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; \
+    upgrade-insecure-requests;";
+
+/// Coppie (nome, valore) dei security header — stessa lista sia nell'albero di
+/// certificazione (add_to_cert_tree) sia nella risposta servita
+/// (build_certified_headers): i valori DEVONO combaciare o il gateway rifiuta.
+fn security_headers() -> Vec<(String, String)> {
+    vec![
+        ("referrer-policy".to_string(), REFERRER_POLICY.to_string()),
+        (
+            "content-security-policy".to_string(),
+            CONTENT_SECURITY_POLICY.to_string(),
+        ),
+    ]
+}
+
 // ─── CEL expression ─────────────────────────────────────────────────────────
 
 fn build_cel_expr() -> ic_http_certification::cel::DefaultResponseOnlyCelExpression<'static> {
     DefaultCelBuilder::response_only_certification()
-        .with_response_certification(
-            DefaultResponseCertification::certified_response_headers(vec!["content-type"]),
-        )
+        .with_response_certification(DefaultResponseCertification::certified_response_headers(
+            vec!["content-type", "referrer-policy", "content-security-policy"],
+        ))
         .build()
 }
 
@@ -133,12 +168,14 @@ fn build_cel_expr() -> ic_http_certification::cel::DefaultResponseOnlyCelExpress
 fn add_to_cert_tree(path: &str, content_type: &str, content: &[u8]) {
     let cel = build_cel_expr();
     let cel_str = cel.to_string();
+    let mut cert_headers = vec![
+        ("content-type".to_string(), content_type.to_string()),
+        (CERTIFICATE_EXPRESSION_HEADER_NAME.to_string(), cel_str.clone()),
+    ];
+    cert_headers.extend(security_headers());
     let response = CertHttpResponse::builder()
         .with_status_code(StatusCode::OK)
-        .with_headers(vec![
-            ("content-type".to_string(), content_type.to_string()),
-            (CERTIFICATE_EXPRESSION_HEADER_NAME.to_string(), cel_str.clone()),
-        ])
+        .with_headers(cert_headers)
         .with_body(Cow::Borrowed(content))
         .build();
     let certification = HttpCertification::response_only(&cel, &response, None)
@@ -181,6 +218,7 @@ fn build_certified_headers(path: &str, content_type: &str) -> Vec<(String, Strin
         ("content-type".to_string(), content_type.to_string()),
         ("cache-control".to_string(), "public, max-age=3600".to_string()),
     ];
+    headers.extend(security_headers());
 
     let cert_data = CERT_MAP.with(|m| m.borrow().get(path).cloned());
     let Some((certification, cel_str)) = cert_data else {
@@ -283,12 +321,16 @@ pub fn serve(path: &str) -> HttpResponse {
             body: data.content.clone(),
             upgrade: Some(false),
         },
-        None => HttpResponse {
-            status_code: 404,
-            headers: vec![("content-type".to_string(), "text/plain".to_string())],
-            body: b"Not Found".to_vec(),
-            upgrade: Some(false),
-        },
+        None => {
+            let mut headers = vec![("content-type".to_string(), "text/plain".to_string())];
+            headers.extend(security_headers());
+            HttpResponse {
+                status_code: 404,
+                headers,
+                body: b"Not Found".to_vec(),
+                upgrade: Some(false),
+            }
+        }
     })
 }
 
@@ -427,6 +469,32 @@ mod tests {
         assert_eq!(resp.body, b"console.log('hi')");
         // Senza cert, serve solo content-type + cache-control
         assert!(resp.headers.iter().any(|(k, v)| k == "content-type" && v == "application/javascript"));
+    }
+
+    /// I security header (anti-leak del claim token nel Referer) devono uscire
+    /// su OGNI risposta, 200 e 404, con gli stessi valori messi nell'albero di
+    /// certificazione — se questo test cambia, cambiare anche il CEL.
+    #[test]
+    fn serve_emits_security_headers() {
+        setup();
+        upload_nocert("/app.js", "application/javascript", b"x");
+
+        for resp in [serve("/app.js"), serve("/nonexistent.js")] {
+            assert!(
+                resp.headers.iter().any(|(k, v)| k == "referrer-policy" && v == "no-referrer"),
+                "referrer-policy mancante (status {})", resp.status_code
+            );
+            let csp = resp
+                .headers
+                .iter()
+                .find(|(k, _)| k == "content-security-policy")
+                .map(|(_, v)| v.as_str())
+                .unwrap_or_else(|| panic!("CSP mancante (status {})", resp.status_code));
+            assert!(csp.contains("default-src 'self';"));
+            assert!(csp.contains("frame-ancestors 'none';"));
+            // Le continuation-line del literal Rust non devono mangiare gli spazi.
+            assert!(csp.contains("http://127.0.0.1:* https://ic0.app"));
+        }
     }
 
     // ── http_request routing ──

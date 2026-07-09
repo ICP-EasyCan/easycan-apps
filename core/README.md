@@ -1,6 +1,6 @@
 # core/ — Blocchi Riutilizzabili
 
-13 crate Rust riutilizzabili per assemblare app ICP decentralizzate.
+15 crate Rust riutilizzabili per assemblare app ICP decentralizzate.
 
 ## Core (5) — sempre presenti in ogni app
 
@@ -12,7 +12,7 @@
 | `core-timer` | Cleanup automatico TTL (messaggi, segnali, presenze) |
 | `core-assets` | Asset storage + HTTP serving + IC Certification v2 |
 
-## Capability (8) — aggiungi solo ciò che serve
+## Capability (10) — aggiungi solo ciò che serve
 
 | Crate | Cosa fa |
 |-------|---------|
@@ -24,6 +24,8 @@
 | `cap-crud` | Operazioni CRUD generiche con namespace e paginazione |
 | `cap-crypto` | E2EE stub (VetKeys — TODO) |
 | `cap-platform` | Ponte SaaS: claim/eject/tier/metadata per marketplace |
+| `cap-store` | KV `namespace:key` + host bundle hash-verificati + permessi (per EasyHub) |
+| `cap-automation` | Job (azioni interne + esterne) + scheduler persistente sul tick di core-timer |
 
 ## Matrice decisionale
 
@@ -60,7 +62,9 @@ Schema: blocchi da 10 per capability. Fonte di verità: `core-storage/src/lib.rs
 | 71 | cap-crud | COUNTER |
 | 72 | cap-crud | NS_INDEX |
 | 73-79 | — | libero crud |
-| 80-199 | — | 12 blocchi per future capability |
+| 80-82 | cap-store | STORE_KV (80) · STORE_BUNDLE_META (81) · STORE_ASSETS (82); 83-89 margine |
+| 90-93 | cap-automation | AUTO_JOBS (90) · AUTO_SCHEDULES (91) · AUTO_STATUS (92) · AUTO_LOG (93); 94-99 margine |
+| 100-199 | — | 10 blocchi per future capability |
 | 200-249 | — | riservato Runtime L2 |
 | 250 | cap-platform | PLATFORM_STATE (feature-gated) |
 | 251-255 | — | riservato SaaS |

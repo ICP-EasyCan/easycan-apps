@@ -135,8 +135,14 @@ fn remove_from_whitelist(peer: Principal) -> Result<(), String> {
     core_auth::remove_from_whitelist(caller(), peer)
 }
 
+/// Un peer può chiedere solo di sé stesso (`caller == peer`, pre-flight del
+/// mutual-contact check); owner/user vedono tutto. Terzi: sempre `false`,
+/// così la whitelist non è sondabile dall'esterno (grafo sociale).
 #[ic_cdk::query]
-fn is_whitelisted(peer: Principal) -> bool { core_auth::is_whitelisted(peer) }
+fn is_whitelisted(peer: Principal) -> bool {
+    let c = caller();
+    (c == peer || core_auth::is_authorized(c)) && core_auth::is_whitelisted(peer)
+}
 
 // ─── core-assets ────────────────────────────────────────────────────────────
 

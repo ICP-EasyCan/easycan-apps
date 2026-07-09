@@ -22,10 +22,12 @@
  * → "dati intatti"; dall'install in poi è un reinstall (stable memory azzerata).
  *
  * Integrazione (main.js):
- *   import { getInstallParamsFromUrl, stashInstallParams, cleanInstallFromUrl,
- *            getPendingInstall } from '@shared/capabilities/update/handoff.js';
+ *   import { captureInstallParams, getPendingInstall }
+ *     from '@shared/capabilities/update/handoff.js';
  *   import { mountInstallPage } from '@shared/capabilities/update/handoff-page.js';
- *   // al boot/login: se getInstallParamsFromUrl() → stash + clean URL → naviga a #install
+ *   // primo statement sincrono del boot, PRIMA di startRouter():
+ *   //   captureInstallParams()  → stash + clean del fragment #install=&token=
+ *   // al boot/login: se getPendingInstall() → naviga a #install
  *   route('#install', () => requireAuth(() =>
  *     mountInstallPage(routeContainer, { canisterId: CANISTER_ID, repo, distBranch })));
  *

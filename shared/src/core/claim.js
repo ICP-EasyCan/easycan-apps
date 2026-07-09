@@ -2,16 +2,26 @@
  * claim.js — Deep link claim handler for platform apps.
  *
  * When a user buys an app on the portal, they receive a deep link:
- *   https://<canisterId>.icp0.io?claim=<hex_token>
+ *   https://<canisterId>.icp0.io#claim=<hex_token>
+ *
+ * Il token è una credenziale al portatore: viaggia nel FRAGMENT (mai in query
+ * string) perché i fragment non finiscono nell'header Referer, nei log dei
+ * boundary node né nelle richieste al server. Non reintrodurre `?claim=`.
+ *
+ * ⚠️ Le app usano hash-router: il fallback del router riscrive l'hash e
+ * distruggerebbe il token. Ogni app DEVE chiamare `captureClaimToken()` come
+ * prima istruzione sincrona del boot, PRIMA di startRouter().
  *
  * This module:
- *   1. Extracts the claim token from the URL query string
+ *   1. Captures the claim token from the URL fragment (sync, pre-router)
  *   2. Waits for authentication (user needs an II identity on this origin)
  *   3. Calls platform_claim(token) on the app canister
  *   4. Cleans the URL to remove the token
  *
  * Usage in app boot:
- *   import { handleDeepLinkClaim } from '@shared/core/claim.js';
+ *   import { captureClaimToken, handleDeepLinkClaim } from '@shared/core/claim.js';
+ *   captureClaimToken();               // primo statement sincrono del boot
+ *   ...
  *   await handleDeepLinkClaim(CANISTER_ID);
  */
 
@@ -35,15 +45,37 @@ function fromHex(hex) {
 const TOKEN_STORAGE_KEY = 'claim:pending-token';
 const RELOGIN_FLAG_KEY  = 'claim:relogin-required';
 
+// Fragment atteso: "#claim=<64 hex>" — esatto, prima che il router lo tocchi.
+const CLAIM_HASH_RE = /^#claim=([0-9a-fA-F]{64})$/;
+
+// True se il token è arrivato nell'URL in QUESTO pageload (catturato da
+// captureClaimToken). Sostituisce il vecchio "fromUrl" ora che l'hash viene
+// pulito subito: serve alla regola di forced re-login al boot.
+let _capturedThisLoad = false;
+
 /**
- * Extract claim token from URL if present.
+ * Extract claim token from URL fragment if present.
  * @returns {Uint8Array|null} 32-byte token or null
  */
 export function getClaimTokenFromUrl() {
-  const params = new URLSearchParams(window.location.search);
-  const hex = params.get('claim');
-  if (!hex || hex.length !== 64) return null;
-  return fromHex(hex);
+  const m = CLAIM_HASH_RE.exec(window.location.hash);
+  return m ? fromHex(m[1]) : null;
+}
+
+/**
+ * Cattura sincrona del token dal fragment: stash in sessionStorage + pulizia
+ * dell'URL. DEVE girare prima di startRouter() (il fallback del router
+ * riscriverebbe l'hash). Idempotente: le chiamate successive alla cattura
+ * riportano comunque true per tutto il pageload.
+ * @returns {boolean} true se un token è stato catturato in questo pageload
+ */
+export function captureClaimToken() {
+  const m = CLAIM_HASH_RE.exec(window.location.hash);
+  if (!m) return _capturedThisLoad;
+  try { sessionStorage.setItem(TOKEN_STORAGE_KEY, m[1].toLowerCase()); } catch (_) {}
+  _capturedThisLoad = true;
+  cleanClaimFromUrl();
+  return true;
 }
 
 /**
@@ -62,12 +94,8 @@ function getPendingTokenFromStorage() {
   }
 }
 
-function toHex(bytes) {
-  return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
-}
-
 /**
- * Vero solo se un claim sta DAVVERO per avvenire: token `?claim=` nell'URL o
+ * Vero solo se un claim sta DAVVERO per avvenire: token `#claim=` nell'URL o
  * token pendente in sessionStorage (ripresa dopo logout forzato). Serve alla UI
  * per distinguere "sto registrando la proprietà" (acquisto fresh) dal semplice
  * "sto verificando la proprietà" (re-login, post-reinstall): dopo un reinstall
@@ -79,13 +107,11 @@ export function isClaimPending() {
 }
 
 /**
- * Remove the ?claim= parameter from the URL without reloading.
+ * Remove the #claim= fragment from the URL without reloading.
  */
 function cleanClaimFromUrl() {
   const url = new URL(window.location.href);
-  url.searchParams.delete('claim');
-  const clean = url.pathname + (url.searchParams.toString() ? '?' + url.searchParams.toString() : '') + url.hash;
-  window.history.replaceState(null, '', clean);
+  window.history.replaceState(null, '', url.pathname + url.search);
 }
 
 /**
@@ -100,16 +126,11 @@ function cleanClaimFromUrl() {
 export async function handleDeepLinkClaim(canisterId, options = {}) {
   const source = options.source || 'boot'; // 'boot' | 'login'
 
-  // 1. Estrai token — prima dall'URL, poi dallo storage (ripresa dopo logout forzato).
-  let token = getClaimTokenFromUrl();
-  const fromUrl = token !== null;
-
-  if (fromUrl) {
-    try { sessionStorage.setItem(TOKEN_STORAGE_KEY, toHex(token)); } catch (_) {}
-    cleanClaimFromUrl();
-  } else {
-    token = getPendingTokenFromStorage();
-  }
+  // 1. Cattura (idempotente — l'app dovrebbe averlo già fatto pre-router) e
+  //    leggi il token dallo storage. `fromUrl` = arrivato nell'URL in questo
+  //    pageload, distingue il deep-link fresco dalla ripresa post-relogin.
+  const fromUrl = captureClaimToken();
+  const token = getPendingTokenFromStorage();
 
   if (!token) return { claimed: false };
 

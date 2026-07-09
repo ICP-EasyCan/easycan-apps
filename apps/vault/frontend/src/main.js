@@ -11,9 +11,9 @@ import { initAuth, login, logout, isAuthenticated, getPrincipalText }
                                from '@shared/core/auth.js';
 import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
                                from '@shared/core/icp.js';
-import { handleDeepLinkClaim, isClaimPending }
+import { captureClaimToken, handleDeepLinkClaim, isClaimPending }
                                from '@shared/core/claim.js';
-import { getInstallParamsFromUrl, stashInstallParams, cleanInstallFromUrl, getPendingInstall }
+import { captureInstallParams, getPendingInstall }
                                from '@shared/capabilities/update/handoff.js';
 import { $ }                   from '@shared/ui/dom.js';
 import { route, fallback, startRouter, navigate }
@@ -53,8 +53,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'vault-v0.2.0',
-  releaseSha256: '12ba22b4539b01b0d054678fffdd4a082ffb2f5e5bc8d60e60a4a8ed4090b397',
+  releaseTag: 'vault-v0.2.1',
+  releaseSha256: 'f1b6d00474dc6473b5563378b1211fcd5b19a4fa3001b0f79e2fc9df484521da',
   dockerPackage: 'vault-canister',
   e2eeFrontend: true,       // il vault cifra nel frontend → caveat E2EE
 };
@@ -69,6 +69,14 @@ const UPGRADE = {
 };
 
 async function boot() {
+  // Cattura dei token dal fragment (#claim= / #install=): sincrona e PRIMA di
+  // startRouter() — il fallback del router riscrive l'hash e li distruggerebbe.
+  // Stash in sessionStorage + pulizia URL (sopravvive a login/relogin; back/refresh
+  // non ri-scatta). Il reinstall vero parte solo dalla pagina #install, dietro
+  // conferma esplicita.
+  captureClaimToken();
+  const installCaptured = captureInstallParams();
+
   await initAuth();
 
   if (isAuthenticated() && getPrincipalText() === '2vxsx-fae') {
@@ -77,21 +85,14 @@ async function boot() {
 
   const routeContainer = $('#route-container');
 
-  // Deep-link cambio-app (Arco B): atterriamo con ?install=<app>&token=<hex> dal portale.
-  // Stash + pulisci l'URL subito (sopravvive a login/relogin; back/refresh non ri-scatta).
-  // Il reinstall vero parte solo dalla pagina #install, dietro conferma esplicita.
-  const installParams = getInstallParamsFromUrl();
-  if (installParams) {
-    stashInstallParams(installParams);
-    cleanInstallFromUrl();
-    // Cambio-app = reinstall distruttivo (gemello del claim irreversibile): se esiste
-    // già una sessione II su questo origin, forziamo logout così l'utente passa per il
-    // login col banner di autorizzazione e conferma l'identità coscientemente — niente
-    // salto silenzioso a #install. I params restano in sessionStorage e l'auth:login
-    // post-relogin porta a #install. Cfr. relogin del claim (claim.js).
-    if (isAuthenticated()) {
-      await logout();
-    }
+  // Deep-link cambio-app (Arco B): cambio-app = reinstall distruttivo (gemello del
+  // claim irreversibile): se esiste già una sessione II su questo origin, forziamo
+  // logout così l'utente passa per il login col banner di autorizzazione e conferma
+  // l'identità coscientemente — niente salto silenzioso a #install. I params restano
+  // in sessionStorage e l'auth:login post-relogin porta a #install. Cfr. relogin del
+  // claim (claim.js).
+  if (installCaptured && isAuthenticated()) {
+    await logout();
   }
 
   let appOwnershipVerified = false;

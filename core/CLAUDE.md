@@ -2,7 +2,7 @@
 
 > **Linea:** Build · **Contratto:** MemoryId e `bucket_size` immutabili dopo deploy — fonte di verità per le app che assemblano.
 
-13 crate Rust: 5 core (`core-types`, `core-auth`, `core-storage`, `core-timer`, `core-assets`) + 8 capability (`cap-presence`, `cap-messaging`, `cap-signaling`, `cap-notify`, `cap-archive`, `cap-crud`, `cap-crypto`, `cap-platform`).
+15 crate Rust: 5 core (`core-types`, `core-auth`, `core-storage`, `core-timer`, `core-assets`) + 10 capability (`cap-presence`, `cap-messaging`, `cap-signaling`, `cap-notify`, `cap-archive`, `cap-crud`, `cap-crypto`, `cap-platform`, `cap-store`, `cap-automation`).
 
 ## Regole specifiche di questa zona
 

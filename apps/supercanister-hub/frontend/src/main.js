@@ -13,7 +13,7 @@ import { initAuth, logout, isAuthenticated, getPrincipalText, getPrincipal }
                                from '@shared/core/auth.js';
 import { setDefaultIdlFactory, call, query, setOwnCanisterId }
                                from '@shared/core/icp.js';
-import { handleDeepLinkClaim, isClaimPending } from '@shared/core/claim.js';
+import { captureClaimToken, handleDeepLinkClaim, isClaimPending } from '@shared/core/claim.js';
 import { $ }                   from '@shared/ui/dom.js';
 import { route, fallback, startRouter, navigate }
                                from '@shared/ui/router.js';
@@ -56,6 +56,11 @@ const UPGRADE = { repo: 'ICP-EasyCan/easycan-apps', app: 'hub', enableInstall: f
 const markPresence = () => { checkin().catch((e) => console.debug('checkin skipped:', e?.message)); };
 
 async function boot() {
+  // Cattura del token dal fragment (#claim=): sincrona e PRIMA di startRouter()
+  // — il fallback del router riscrive l'hash e lo distruggerebbe. (#decrypt non
+  // collide: il claim arriva solo come "#claim=<hex64>" esatto.)
+  captureClaimToken();
+
   await initAuth();
 
   if (isAuthenticated() && getPrincipalText() === '2vxsx-fae') {

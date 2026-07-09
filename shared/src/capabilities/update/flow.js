@@ -13,9 +13,13 @@
  *   5. fetch frontend.tar.gz → verifica → clear_assets → upload_asset_batch → finalize
  *   6. health-check: app_version() == manifest.version + ping query base
  *
- * Solo messenger, MAI vault. La finestra offline è solo stop→install→start (i chunk si
- * caricano a canister vivo). In caso di guasto, lo snapshot del passo 3 permette il
- * rollback manuale (UI in page.js; auto-rollback è Fase 3).
+ * Attivo su messenger E vault (entrambi `enableInstall:true` in main.js). La finestra
+ * offline è stop→snapshot→install→start (i chunk si caricano a canister vivo); se il
+ * browser muore DENTRO quella finestra il canister resta Stopped e la sua UI — servita
+ * da sé stesso — diventa irraggiungibile (recovery solo via chiamata controller fuori
+ * dal canister; cfr. warning in page.js doInstall + known_bugs 2a). In caso di guasto
+ * non fatale, lo snapshot del passo 3 permette il rollback manuale (UI in page.js;
+ * auto-rollback è Fase 3).
  */
 
 import {

@@ -12,9 +12,9 @@ import { initAuth, login, logout, isAuthenticated, getPrincipalText, getPrincipa
                                from '@shared/core/auth.js';
 import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
                                from '@shared/core/icp.js';
-import { handleDeepLinkClaim, isClaimPending }
+import { captureClaimToken, handleDeepLinkClaim, isClaimPending }
                                from '@shared/core/claim.js';
-import { getInstallParamsFromUrl, stashInstallParams, cleanInstallFromUrl, getPendingInstall }
+import { captureInstallParams, getPendingInstall }
                                from '@shared/capabilities/update/handoff.js';
 import { $ }                   from '@shared/ui/dom.js';
 import { route, fallback, startRouter, navigate }
@@ -65,6 +65,14 @@ const VERIFY = {
 const UPGRADE = { repo: 'ICP-EasyCan/easycan-apps', app: 'messenger', enableInstall: true };
 
 async function boot() {
+  // Cattura dei token dal fragment (#claim= / #install=): sincrona e PRIMA di
+  // startRouter() — il fallback del router riscrive l'hash e li distruggerebbe.
+  // Stash in sessionStorage + pulizia URL (sopravvive a login/relogin; back/refresh
+  // non ri-scatta). Il reinstall vero parte solo dalla pagina #install, dietro
+  // conferma esplicita.
+  captureClaimToken();
+  captureInstallParams();
+
   await initAuth();
 
   // Se la delegation II è scaduta (principal anonimo), pulisci la sessione
@@ -74,15 +82,6 @@ async function boot() {
 
   // Route container per App Shell
   const routeContainer = $('#route-container');
-
-  // Deep-link cambio-app (Arco B): atterriamo con ?install=<app>&token=<hex> dal portale.
-  // Stash + pulisci l'URL subito (sopravvive a login/relogin; back/refresh non ri-scatta).
-  // Il reinstall vero parte solo dalla pagina #install, dietro conferma esplicita.
-  const installParams = getInstallParamsFromUrl();
-  if (installParams) {
-    stashInstallParams(installParams);
-    cleanInstallFromUrl();
-  }
 
   let appOwnershipVerified = false;
 
@@ -199,7 +198,7 @@ async function boot() {
     initBottomNav();
     initDesktopRail();
     // Al boot NON claimare implicitamente — la sessione potrebbe essere stale (dopo dfx --clean).
-    // Eccezione: deep link claim (?claim=<token>) è un'azione esplicita dell'utente.
+    // Eccezione: deep link claim (#claim=<token>) è un'azione esplicita dell'utente.
     handleDeepLinkClaim(CANISTER_ID, { source: 'boot' })
       .then(() => checkOwnership(getPrincipalText()))
       .then(isOwner => {
