@@ -53,8 +53,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'vault-v0.2.1',
-  releaseSha256: 'f1b6d00474dc6473b5563378b1211fcd5b19a4fa3001b0f79e2fc9df484521da',
+  releaseTag: 'vault-v0.2.2',
+  releaseSha256: '2ed1ed7c0fb3c62ac5f6f43da43996794546ba4cbd08dc71190f610da5054dc3',
   dockerPackage: 'vault-canister',
   e2eeFrontend: true,       // il vault cifra nel frontend → caveat E2EE
 };

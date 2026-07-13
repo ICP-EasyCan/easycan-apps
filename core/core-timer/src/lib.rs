@@ -66,60 +66,70 @@ pub fn cleanup_count() -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::cell::Cell;
 
-    static CALL_COUNT: AtomicU32 = AtomicU32::new(0);
+    // Thread-local come CLEANUP_FNS: libtest esegue i test su thread paralleli,
+    // un contatore globale condiviso incrocia i conteggi tra test.
+    thread_local! {
+        static CALL_COUNT: Cell<u32> = const { Cell::new(0) };
+    }
+
+    fn count() -> u32 {
+        CALL_COUNT.with(|c| c.get())
+    }
+
+    fn add(n: u32) {
+        CALL_COUNT.with(|c| c.set(c.get() + n));
+    }
 
     fn reset() {
         clear();
-        CALL_COUNT.store(0, Ordering::SeqCst);
+        CALL_COUNT.with(|c| c.set(0));
     }
 
     #[test]
     fn register_and_run() {
         reset();
-        register_cleanup(|| {
-            CALL_COUNT.fetch_add(1, Ordering::SeqCst);
-        });
+        register_cleanup(|| add(1));
         assert_eq!(cleanup_count(), 1);
 
         run_all_cleanups();
-        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 1);
+        assert_eq!(count(), 1);
 
         run_all_cleanups();
-        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 2);
+        assert_eq!(count(), 2);
     }
 
     #[test]
     fn multiple_cleanups_all_called() {
         reset();
-        register_cleanup(|| { CALL_COUNT.fetch_add(1, Ordering::SeqCst); });
-        register_cleanup(|| { CALL_COUNT.fetch_add(10, Ordering::SeqCst); });
-        register_cleanup(|| { CALL_COUNT.fetch_add(100, Ordering::SeqCst); });
+        register_cleanup(|| add(1));
+        register_cleanup(|| add(10));
+        register_cleanup(|| add(100));
 
         assert_eq!(cleanup_count(), 3);
         run_all_cleanups();
-        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 111);
+        assert_eq!(count(), 111);
     }
 
     #[test]
     fn clear_removes_all() {
         reset();
-        register_cleanup(|| { CALL_COUNT.fetch_add(1, Ordering::SeqCst); });
-        register_cleanup(|| { CALL_COUNT.fetch_add(1, Ordering::SeqCst); });
+        register_cleanup(|| add(1));
+        register_cleanup(|| add(1));
         assert_eq!(cleanup_count(), 2);
 
         clear();
         assert_eq!(cleanup_count(), 0);
 
         run_all_cleanups();
-        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(count(), 0);
     }
 
     #[test]
     fn run_empty_noop() {
         reset();
         run_all_cleanups(); // nessun panic
-        assert_eq!(CALL_COUNT.load(Ordering::SeqCst), 0);
+        assert_eq!(count(), 0);
     }
 }
