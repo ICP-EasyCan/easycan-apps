@@ -42,10 +42,10 @@ setDefaultIdlFactory(idlFactory);
 // resterà ✗ onesto finché EasyHub non ha una release riproducibile (F5/F6). Da riempire alla cut-release.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  // Stringhe vuote (non null): cut-release.sh riempie questi due via sed su `releaseTag: 'supercanister-hub-v0.2.1'`
-  // / `releaseSha256: '8a4bfd7e65e7762f9da40a105edc796471f73ee023d95269ec8d81d506ba8af7'` al taglio della release → finché vuoti, #verify resta ✗ onesto.
-  releaseTag: 'supercanister-hub-v0.2.1',
-  releaseSha256: '8a4bfd7e65e7762f9da40a105edc796471f73ee023d95269ec8d81d506ba8af7',
+  // Stringhe vuote (non null): cut-release.sh riempie questi due via sed su `releaseTag: 'supercanister-hub-v0.2.2'`
+  // / `releaseSha256: '8a6c1de74fda4d090b3aba71c231d1b0a8aa9bee50b8cbea3e77de86277941ab'` al taglio della release → finché vuoti, #verify resta ✗ onesto.
+  releaseTag: 'supercanister-hub-v0.2.2',
+  releaseSha256: '8a6c1de74fda4d090b3aba71c231d1b0a8aa9bee50b8cbea3e77de86277941ab',
   dockerPackage: 'hub-canister',
 };
 
