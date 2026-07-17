@@ -1,16 +1,19 @@
 /**
  * add-contact.js — Route #add-contact: home unica per aggiungere contatti.
  *
- * Tre tab: Paste (default), Scan QR, Manual.
- * Tutte e tre confluiscono in confirmAdd(): preview → add_to_whitelist → save.
+ * Quattro tab: Paste (default), Scan QR, Manual, My code.
+ * Le prime tre confluiscono in confirmAdd(): preview → add_to_whitelist → save.
+ * My code va nel verso opposto: mostra il MIO contatto (QR + stringa copiabile)
+ * nello stesso formato JSON che parseContactInput() riconosce — round-trip garantito.
  */
 
 import { CANISTER_ID }    from '@shared/core/config.js';
 import { call }            from '@shared/core/icp.js';
+import { getPrincipalText } from '@shared/core/auth.js';
 import { el, render, truncate }
                            from '@shared/ui/dom.js';
 import { navigate }        from '@shared/ui/router.js';
-import { loadContacts, saveContacts }
+import { loadContacts, addContact, updateContactAlias }
                            from '../contacts-store.js';
 import { avatarEl }        from '../components/avatar.js';
 import { parseContactInput } from '../lib/parse-contact.js';
@@ -31,6 +34,7 @@ function _render(container) {
 
   const body = _activeTab === 'paste'  ? _pasteView(container)
              : _activeTab === 'scan'   ? _scanView(container)
+             : _activeTab === 'mycode' ? _myCodeView()
              : _manualView(container);
 
   render(container,
@@ -46,6 +50,7 @@ function _render(container) {
         tabBtn('paste',  'Paste'),
         tabBtn('scan',   'Scan QR'),
         tabBtn('manual', 'Manual'),
+        tabBtn('mycode', 'My code'),
       ),
       el('div', { class: 'add-body' }, body),
     ),
@@ -97,10 +102,11 @@ function _scanView(container) {
   const status  = el('p', { class: 'status' });
   const preview = el('div', { class: 'add-preview' });
 
-  if (!('BarcodeDetector' in window)) {
+  if (!navigator.mediaDevices?.getUserMedia) {
     return el('div', { class: 'add-section' },
       el('p', { class: 'hint' },
-        'Your browser does not support native QR scanning. Use the Paste tab and paste the contact code instead.'),
+        'Camera access is not available here (it requires a secure HTTPS connection). ' +
+        'Tip: scan the QR with your phone’s camera app, copy the text and paste it in the Paste tab.'),
       el('button', {
         class: 'btn-primary',
         onclick: () => { _activeTab = 'paste'; _render(container); },
@@ -112,13 +118,13 @@ function _scanView(container) {
 
   (async () => {
     try {
+      const detect = await _makeQrDetector();
       const stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'environment' },
       });
       video.srcObject = stream;
       await video.play().catch(() => {});
 
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
       let stopped = false;
       _stopScanner = () => {
         stopped = true;
@@ -129,9 +135,8 @@ function _scanView(container) {
       const loop = async () => {
         if (stopped) return;
         try {
-          const codes = await detector.detect(video);
-          if (codes && codes.length > 0) {
-            const raw = codes[0].rawValue || '';
+          const raw = await detect(video);
+          if (raw) {
             const res = parseContactInput(raw);
             if (!res.error) {
               _stopScannerIfAny();
@@ -158,6 +163,40 @@ function _scanView(container) {
   );
 }
 
+/**
+ * Ritorna una funzione detect(video) → stringa QR o null.
+ * BarcodeDetector nativo dove esiste (Chrome/Edge/Android); altrove
+ * (WebKit/iOS, Firefox: la Shape Detection API non c'è) fallback jsQR
+ * lazy-loaded: frame del video su canvas → decodifica JS.
+ */
+async function _makeQrDetector() {
+  if ('BarcodeDetector' in window) {
+    const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
+    return async (video) => {
+      const codes = await detector.detect(video);
+      return (codes && codes.length > 0 && codes[0].rawValue) || null;
+    };
+  }
+
+  const m = await import('jsqr');
+  const jsQR = m.default ?? m;
+  const canvas = document.createElement('canvas');
+  const ctx = canvas.getContext('2d', { willReadFrequently: true });
+
+  return (video) => {
+    const vw = video.videoWidth, vh = video.videoHeight;
+    if (!vw || !vh) return null;
+    // Downscale a ~640px: decodifica più veloce, il QR resta leggibilissimo.
+    const scale = Math.min(1, 640 / vw);
+    const w = Math.round(vw * scale), h = Math.round(vh * scale);
+    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+    ctx.drawImage(video, 0, 0, w, h);
+    const img = ctx.getImageData(0, 0, w, h);
+    const code = jsQR(img.data, w, h);
+    return code?.data || null;
+  };
+}
+
 // ─── Manual tab ─────────────────────────────────────────────────────────────
 
 function _manualView(container) {
@@ -176,6 +215,48 @@ function _manualView(container) {
 
   return el('div', { class: 'add-section' },
     cid, pid, alias, submit, status,
+  );
+}
+
+// ─── My code tab ────────────────────────────────────────────────────────────
+
+function _myCodeView() {
+  const myPrincipal = getPrincipalText();
+  if (!myPrincipal) {
+    return el('div', { class: 'add-section' },
+      el('p', { class: 'hint' }, 'Log in to generate your contact code.'),
+    );
+  }
+
+  // Stesso payload per QR e stringa: JSON già riconosciuto da parseContactInput().
+  const payload = JSON.stringify({ canisterId: CANISTER_ID, principalId: myPrincipal });
+
+  const qrStatus = el('p', { class: 'status' });
+  const canvas = el('canvas', { class: 'add-qr-canvas' });
+  import('qrcode')
+    .then(m => (m.default ?? m).toCanvas(canvas, payload, { width: 240, margin: 2 }))
+    .catch(err => { qrStatus.textContent = `Could not generate QR: ${err.message}`; });
+
+  const copyBtn = el('button', { class: 'btn-primary', type: 'button' }, 'Copy contact code');
+  copyBtn.addEventListener('click', async () => {
+    try { await navigator.clipboard?.writeText(payload); } catch { /* clipboard non disponibile */ }
+    copyBtn.textContent = '✓ Copied';
+    setTimeout(() => { copyBtn.textContent = 'Copy contact code'; }, 1500);
+  });
+
+  return el('div', { class: 'add-section' },
+    el('p', { class: 'hint' },
+      'Let the other person scan this QR with their "Scan QR" tab.'),
+    el('div', { class: 'add-qr-wrap' }, canvas),
+    qrStatus,
+    el('div', { class: 'add-divider' }, 'or share as text'),
+    el('textarea', {
+      class: 'form-input add-paste-input mono', rows: 3, readonly: true,
+      onclick: (e) => e.target.select(),
+    }, payload),
+    copyBtn,
+    el('p', { class: 'hint small' },
+      'Send it via any messaging app — the other person pastes it in their "Paste" tab.'),
   );
 }
 
@@ -225,16 +306,10 @@ async function _confirmAdd(contact, statusEl, container, opts = {}) {
     const contacts = loadContacts();
     const existing = contacts.find(c => c.canisterId === contact.canisterId && c.principalId === contact.principalId);
     if (existing) {
-      existing.alias = contact.alias || existing.alias || '';
-      saveContacts(contacts);
+      updateContactAlias(existing.canisterId, contact.alias || existing.alias || '');
       statusEl.textContent = '✓ Contact already in list — alias updated.';
     } else {
-      contacts.push({
-        canisterId: contact.canisterId,
-        principalId: contact.principalId,
-        alias: contact.alias || '',
-      });
-      saveContacts(contacts);
+      addContact(contact.canisterId, contact.principalId, contact.alias || '');
       statusEl.textContent = '✓ Contact added.';
     }
     _stopScannerIfAny();

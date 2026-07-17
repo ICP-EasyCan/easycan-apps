@@ -10,7 +10,7 @@ import { bus }                 from '@shared/core/event-bus.js';
 import { CANISTER_ID }         from '@shared/core/config.js';
 import { initAuth, login, logout, isAuthenticated, getPrincipalText, getPrincipal }
                                from '@shared/core/auth.js';
-import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId }
+import { setDefaultIdlFactory, call, query, resetActors, setOwnCanisterId, getActorFor }
                                from '@shared/core/icp.js';
 import { captureClaimToken, handleDeepLinkClaim, isClaimPending }
                                from '@shared/core/claim.js';
@@ -41,6 +41,14 @@ import { initDesktopRail, teardownDesktopRail }
                                from './app/layout/desktop-rail.js';
 import { initConnectionManager, stopConnectionManager }
                                from './app/connection-manager.js';
+import { initSounds, playMessage }
+                               from '@shared/capabilities/sounds/index.js';
+import { getContactByPrincipal }
+                               from '@shared/capabilities/contacts/index.js';
+import { initContacts, resetContactsSession }
+                               from './app/contacts-store.js';
+import { maybeNotify, closeNotification }
+                               from './app/lib/notifications.js';
 
 // ─── Bootstrap ──────────────────────────────────────────────────────────────
 
@@ -53,8 +61,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'messenger-v0.2.2',
-  releaseSha256: '44164e24995e985062b07922b45c66883a481e1d4b276930938e1e4fbfcb4d1c',
+  releaseTag: 'messenger-v0.3.0',
+  releaseSha256: '4fc06b27151f283de6f235a1040664e93ab92f78907d7e2ee4166b416d1b1d57',
   dockerPackage: 'messenger-canister',
   e2eeFrontend: false,      // messenger NON è E2EE
 };
@@ -156,10 +164,12 @@ async function boot() {
       const isOwner = await checkOwnership(principal.toText());
       if (isOwner) {
         appOwnershipVerified = true;
+        initSounds();
         initCallBanner();
         initBottomNav();
         initDesktopRail();
         initConnectionManager();
+        await initContacts(await getActorFor(CANISTER_ID)).catch(e => console.warn('initContacts:', e.message));
         // Cambio-app pendente (Arco B): vai al ricevitore invece che alla home.
         navigate(getPendingInstall() ? '#install' : '#chats');
       }
@@ -168,8 +178,48 @@ async function boot() {
     }
   });
 
+  // ─── Suoni + notifiche su eventi bus ─────────────────────────────────────
+  // 'notify:pending-update' riporta lo stato INTERO ogni poll, non i delta →
+  // snapshot locale e beep/notifica solo sui sender assenti al giro prima.
+  // Il beep in-chat vive in chat.js (callback chat-session); l'anti-doppio-beep
+  // è il throttle 1s dentro playMessage(). maybeNotify è già no-op a pagina
+  // visibile e senza permesso.
+  const aliasOf = (pid) => getContactByPrincipal(pid)?.alias || pid.slice(0, 12) + '...';
+
+  let knownSenders = new Set();
+  bus.on('notify:pending-update', ({ senders }) => {
+    const newSenders = [...senders].filter(pid => !knownSenders.has(pid));
+    knownSenders = new Set(senders);
+    if (newSenders.length === 0) return;
+    playMessage();
+    for (const pid of newSenders) {
+      const contact = getContactByPrincipal(pid);
+      maybeNotify({
+        title: 'New message',
+        body: `From ${aliasOf(pid)}`,
+        tag: `msg-${pid}`,
+        route: contact ? `#chat/${contact.canisterId}:${pid}` : '#chats',
+      });
+    }
+  });
+
+  bus.on('call:incoming', ({ callerPid }) => {
+    maybeNotify({
+      title: 'Incoming call',
+      body: `From ${aliasOf(callerPid)}`,
+      tag: `call-${callerPid}`,
+      requireInteraction: true,
+    });
+  });
+
+  bus.on('call:cancelled', ({ callerPid }) => {
+    closeNotification(`call-${callerPid}`);
+  });
+
   bus.on('auth:logout', () => {
+    knownSenders = new Set();
     appOwnershipVerified = false;
+    resetContactsSession();
     stopConnectionManager();
     teardownDesktopRail();
     removeBottomNav();
@@ -194,6 +244,7 @@ async function boot() {
       if (logoutBtn) logoutBtn.onclick = () => logout();
     }
 
+    initSounds();
     initCallBanner();
     initBottomNav();
     initDesktopRail();
@@ -205,6 +256,9 @@ async function boot() {
         if (isOwner) {
           appOwnershipVerified = true;
           initConnectionManager();
+          getActorFor(CANISTER_ID)
+            .then(initContacts)
+            .catch(e => console.warn('initContacts:', e.message));
           // Cambio-app pendente (Arco B): apri il ricevitore.
           if (getPendingInstall()) navigate('#install');
         }

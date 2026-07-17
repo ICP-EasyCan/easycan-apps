@@ -16,10 +16,13 @@ import {
 import { getContactAlias }   from '../contacts-store.js';
 import { getContactByPrincipal }
                              from '@shared/capabilities/contacts/index.js';
+import { startRingtone, stopRingtone, playCallEnd }
+                             from '@shared/capabilities/sounds/index.js';
 
 let _bannerEl = null;
 let _timerInterval = null;
 let _timerStart = 0;
+let _prevState = CALL_STATES.idle;
 
 /**
  * Inizializza il call banner. Chiamare una volta dopo il login.
@@ -47,6 +50,20 @@ export function initCallBanner() {
 function _handleStateChange(state, meta) {
   if (!_bannerEl) return;
   _clearTimer();
+
+  // Suoni: ringtone solo su incoming; tono di chiusura solo se si arriva
+  // da uno stato di chiamata reale (mai su ended/idle ripetuti).
+  if (state === CALL_STATES.incoming) {
+    startRingtone();
+  } else {
+    stopRingtone();
+  }
+  if (state === CALL_STATES.ended &&
+      (_prevState === CALL_STATES.calling || _prevState === CALL_STATES.incoming ||
+       _prevState === CALL_STATES.connecting || _prevState === CALL_STATES.connected)) {
+    playCallEnd();
+  }
+  _prevState = state;
 
   if (state === CALL_STATES.idle) {
     _bannerEl.className = 'call-banner hidden';

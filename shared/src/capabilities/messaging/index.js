@@ -13,16 +13,22 @@
  *                     const text = new TextDecoder().decode(decryptPlaintext(payload, key));
  *
  * Exports:
- *   sendMessage(ownCid, peerCid, peerPid, senderPid, text)  → void
- *   fetchMessages(peerCid)                                    → [{ id, text, timestampMs }]
+ *   sendMessage(ownCid, peerCid, peerPid, senderPid, text)  → bigint (msgId assegnato)
+ *   fetchMessages(peerCid)                                    → [{ id, text, timestampMs, edited }]
  *   ackMessages(peerCid, ids)                                 → void
  *   countMessages(peerCid)                                    → number
  *   clearPendingSender(ownCid, peerPid)                       → void
+ *   deleteOwnMessage(ownCid, id)                              → void (throw se già consegnato)
+ *   editOwnMessage(ownCid, id, text)                          → void (throw se già consegnato)
+ *   pendingIdsFor(ownCid, peerId)                             → Set<bigint>
+ *   clearOwnPendingFlag(peerCid, myPid)                       → void (best-effort, mai throw)
  *
  * Backend:
  *   leave_message (update), fetch_my_messages (query),
  *   ack_messages (update), count_my_messages (query),
- *   notify_pending_message (update), clear_pending_sender (update).
+ *   notify_pending_message (update), clear_pending_sender (update),
+ *   delete_own_message (update), edit_own_message (update),
+ *   pending_ids_for (query).
  */
 
 import { call, query } from '../../core/icp.js';
@@ -75,6 +81,8 @@ export async function sendMessage(ownCid, peerCid, peerPid, senderPid, text) {
     throw new MessagingError('unknown', result.Err);
   }
 
+  const msgId = result.Ok.id;
+
   // Notify on first message or if a previous notify failed
   const shouldNotify = result?.Ok?.is_first || _notifyPendingFlags.get(peerCid);
   if (shouldNotify) {
@@ -95,6 +103,8 @@ export async function sendMessage(ownCid, peerCid, peerPid, senderPid, text) {
       console.warn('[messaging] notify failed:', err.message);
     }
   }
+
+  return msgId;
 }
 
 /**
@@ -108,7 +118,8 @@ export async function fetchMessages(peerCid) {
   for (const msg of msgs) {
     const text = new TextDecoder().decode(new Uint8Array(msg.payload));
     const timestampMs = Number(msg.timestamp / 1_000_000n);
-    result.push({ id: msg.id, text, timestampMs });
+    const edited = Array.isArray(msg.edited) && msg.edited.length > 0 ? msg.edited[0] : false;
+    result.push({ id: msg.id, text, timestampMs, edited });
   }
   return result;
 }
@@ -140,4 +151,65 @@ export async function countMessages(peerCid) {
 export async function clearPendingSender(ownCid, peerPid) {
   const { Principal } = await import('@dfinity/principal');
   await call(ownCid, 'clear_pending_sender', Principal.fromText(peerPid)).catch(() => {});
+}
+
+/**
+ * Cancella un messaggio ancora nel proprio outbox ("elimina per tutti" — il
+ * peer non lo vedrà mai). Fallisce se il messaggio è già stato consegnato/ackato.
+ * @param {string} ownCid — proprio canister
+ * @param {bigint} id — id del messaggio nell'outbox
+ */
+export async function deleteOwnMessage(ownCid, id) {
+  let result;
+  try {
+    result = await call(ownCid, 'delete_own_message', id);
+  } catch (err) {
+    throw new MessagingError(classifyIcpError(err), err.message);
+  }
+  if (result?.Err) throw new MessagingError('unknown', result.Err);
+}
+
+/**
+ * Sovrascrive il payload di un messaggio ancora nel proprio outbox.
+ * Fallisce se già consegnato/ackato (stessa condizione di deleteOwnMessage).
+ * @param {string} ownCid — proprio canister
+ * @param {bigint} id — id del messaggio nell'outbox
+ * @param {string} text — nuovo testo
+ */
+export async function editOwnMessage(ownCid, id, text) {
+  const bytes = Array.from(new TextEncoder().encode(text));
+  let result;
+  try {
+    result = await call(ownCid, 'edit_own_message', id, bytes);
+  } catch (err) {
+    throw new MessagingError(classifyIcpError(err), err.message);
+  }
+  if (result?.Err) throw new MessagingError('unknown', result.Err);
+}
+
+/**
+ * Id dei messaggi ancora nel proprio outbox verso un peer (non ancora
+ * consegnati/ackati). Pilota le spunte ✓/✓✓ e abilita/disabilita modifica
+ * ed elimina-per-tutti.
+ * @param {string} ownCid — proprio canister
+ * @param {string} peerId — principal del peer
+ * @returns {Promise<Set<bigint>>}
+ */
+export async function pendingIdsFor(ownCid, peerId) {
+  const { Principal } = await import('@dfinity/principal');
+  const ids = await query(ownCid, 'pending_ids_for', Principal.fromText(peerId));
+  return new Set(ids);
+}
+
+/**
+ * Self-clear: spegne sul canister del peer il flag di notifica che si è
+ * acceso da sé (mai quello di un altro mittente — il canister lo impone).
+ * Best-effort: se la chiamata cross-canister fallisce il peer si
+ * auto-guarisce al prossimo poll (fetch a vuoto).
+ * @param {string} peerCid — canister del peer (dove vive il flag da spegnere)
+ * @param {string} myPid — proprio principal (il sender che ha acceso il flag)
+ */
+export async function clearOwnPendingFlag(peerCid, myPid) {
+  const { Principal } = await import('@dfinity/principal');
+  await call(peerCid, 'clear_pending_sender', Principal.fromText(myPid)).catch(() => {});
 }

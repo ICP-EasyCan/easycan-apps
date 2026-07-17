@@ -463,6 +463,7 @@ dependencies = [
  "candid",
  "ic-cdk",
  "ic-cdk-timers",
+ "ic-ledger-types",
  "ic-stable-structures 0.7.2",
  "icrc-ledger-types",
  "pocket-ic",
@@ -913,7 +914,7 @@ checksum = "6dbf3de79e51f3d586ab4cb9d5c3e2c14aa28ed23d180cf89b4df0454a69cc87"
 
 [[package]]
 name = "hub-canister"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "candid",
  "cap-automation",
@@ -1087,6 +1088,21 @@ dependencies = [
  "serde_cbor",
  "thiserror 1.0.69",
  "urlencoding",
+]
+
+[[package]]
+name = "ic-ledger-types"
+version = "0.16.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "60ab0da348a638e01beb5bcc6c0b92e51efbe351950ff99c125d53fff77899d5"
+dependencies = [
+ "candid",
+ "crc32fast",
+ "hex",
+ "ic-cdk",
+ "serde",
+ "serde_bytes",
+ "sha2",
 ]
 
 [[package]]
@@ -1456,10 +1472,11 @@ checksum = "f8ca58f447f06ed17d5fc4043ce1b10dd205e060fb3ce5b979b8ed8e59ff3f79"
 
 [[package]]
 name = "messenger-canister"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "candid",
  "cap-archive",
+ "cap-crud",
  "cap-crypto",
  "cap-messaging",
  "cap-notify",
@@ -2486,6 +2503,7 @@ version = "0.1.0"
 dependencies = [
  "candid",
  "ic-cdk",
+ "ic-ledger-types",
  "icrc-ledger-types",
 ]
 
@@ -2866,7 +2884,7 @@ checksum = "ba73ea9cf16a25df0c8caa16c51acb937d5712a8429db78a3ee29d5dcacd3a65"
 
 [[package]]
 name = "vault-canister"
-version = "0.2.1"
+version = "0.2.2"
 dependencies = [
  "candid",
  "cap-crud",

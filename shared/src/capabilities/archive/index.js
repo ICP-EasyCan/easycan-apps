@@ -11,11 +11,12 @@
  *   syncFromArchive(ownCid, peerId)                   → [{ from, text, timestamp }]
  *   archiveInBackground(ownCid, peerId, records)      → void
  *   getAllPersistentChats(ownCid)                      → [principalId]
+ *   deleteArchivedMessage(ownCid, peerId, fromMe, timestampMs) → boolean (found+deleted)
  *
  * Backend:
  *   is_chat_persistent (query), set_chat_persistent (update),
  *   get_archived_messages (query), archive_messages (update),
- *   get_all_persistent_chats (query).
+ *   get_all_persistent_chats (query), delete_archived_message (update).
  */
 
 import { call, query } from '../../core/icp.js';
@@ -104,4 +105,29 @@ export async function archiveInBackground(ownCid, peerId, records) {
 export async function getAllPersistentChats(ownCid) {
   const principals = await query(ownCid, 'get_all_persistent_chats');
   return principals.map(p => p.toString());
+}
+
+/**
+ * Cancella la propria copia archiviata di un messaggio ("elimina per me").
+ * L'id assegnato dal backend all'archiviazione non è noto al frontend
+ * (archive_messages ritorna solo un conteggio) — si cerca per corrispondenza
+ * (peer, from_me, timestamp), la stessa chiave usata dal backend per il
+ * dedup. Best-effort: se non trovato (mai archiviato, o già rimosso) non è
+ * un errore, si ritorna false.
+ * @param {string} ownCid — proprio canister
+ * @param {string} peerId — principal del peer
+ * @param {boolean} fromMe — true se il messaggio era stato inviato da me
+ * @param {number} timestampMs — timestamp del messaggio in ms
+ * @returns {Promise<boolean>} true se una entry è stata trovata e cancellata
+ */
+export async function deleteArchivedMessage(ownCid, peerId, fromMe, timestampMs) {
+  const { Principal } = await import('@dfinity/principal');
+  const peer = Principal.fromText(peerId);
+  const archived = await query(ownCid, 'get_archived_messages', peer);
+  const timestampNs = BigInt(timestampMs) * 1_000_000n;
+  const match = archived.find(m => m.from_me === fromMe && m.timestamp === timestampNs);
+  if (!match) return false;
+  const result = await call(ownCid, 'delete_archived_message', peer, match.id);
+  if (result?.Err) throw new Error(result.Err);
+  return true;
 }

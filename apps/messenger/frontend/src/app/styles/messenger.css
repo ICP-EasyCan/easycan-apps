@@ -342,6 +342,26 @@
 .msg-action-btn:hover { background: var(--surface-3); }
 .msg-action-discard { color: var(--text-secondary); }
 
+/* Elimina/modifica: visibili solo al passaggio del mouse (desktop); sempre
+   visibili su touch (nessun hover affidabile). */
+.msg-actions-passive { opacity: 0; transition: opacity 0.15s; }
+.msg:hover .msg-actions-passive,
+.msg-actions-passive:focus-within { opacity: 1; }
+@media (hover: none) {
+  .msg-actions-passive { opacity: 1; }
+}
+
+.msg-tick { font-size: 0.7rem; padding: 0 0.5rem; color: var(--text-muted); }
+.msg-tick-delivered { color: var(--accent); }
+.msg-tick-expired { color: var(--text-muted); font-style: italic; }
+.msg-edited { font-size: 0.7rem; color: var(--text-muted); font-style: italic; padding: 0 0.3rem; }
+
+.chat-edit-banner {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0.4rem 1rem; font-size: 0.8rem; color: var(--text-secondary);
+  background: var(--surface-2); border-top: 1px solid var(--border-subtle);
+}
+
 .chat-input {
   display: flex; gap: 0.75rem; padding: 1rem; align-items: flex-end;
   background: var(--surface-glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
@@ -431,6 +451,13 @@
 .add-video {
   width: 100%; max-height: 60vh; background: #000;
   border-radius: var(--radius-lg); border: 1px solid var(--border-strong);
+}
+
+.add-qr-wrap { display: flex; justify-content: center; }
+.add-qr-wrap canvas {
+  background: #fff; padding: 0.5rem;
+  border-radius: var(--radius-lg); border: 1px solid var(--border-strong);
+  max-width: 100%;
 }
 
 .add-preview { margin-top: 0.5rem; }

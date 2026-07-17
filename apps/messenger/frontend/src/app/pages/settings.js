@@ -8,6 +8,10 @@ import { verifyLinkSection }                 from '@shared/capabilities/verify/p
 import { updateLinkSection }                 from '@shared/capabilities/update/page.js';
 import { el }                                from '@shared/ui/dom.js';
 import { CANISTER_ID }                       from '@shared/core/config.js';
+import { isEnabled as soundsEnabled, setEnabled as setSoundsEnabled }
+                                             from '@shared/capabilities/sounds/index.js';
+import { notificationsPermission, requestNotificationPermission }
+                                             from '../lib/notifications.js';
 
 export function renderSettings(container) {
   _renderSettings(container, {
@@ -17,6 +21,18 @@ export function renderSettings(container) {
       sovereigntyLinkSection(),
       verifyLinkSection(),
       updateLinkSection(),
+      {
+        title: 'Sounds',
+        content: [
+          soundsToggleRow(),
+          el('div', { class: 'hint small' },
+            'Plays a short beep for incoming messages and a ringtone for incoming calls.'),
+        ],
+      },
+      {
+        title: 'Notifications',
+        content: notificationsSection(),
+      },
       {
         title: 'Privacy & limitations',
         content: [
@@ -50,4 +66,48 @@ export function renderSettings(container) {
       },
     ],
   });
+}
+
+function soundsToggleRow() {
+  const checkbox = el('input', { type: 'checkbox' });
+  checkbox.checked = soundsEnabled();
+  checkbox.onchange = () => setSoundsEnabled(checkbox.checked);
+  return el('div', { class: 'settings-row' },
+    el('span', { class: 'settings-label' }, 'Message & call sounds'),
+    checkbox,
+  );
+}
+
+function notificationsSection() {
+  const statusText = {
+    granted:     'Enabled',
+    denied:      'Blocked in the browser',
+    default:     'Not enabled',
+    unsupported: 'Not supported by this browser',
+  };
+  const statusVal = el('span', { class: 'settings-value small' }, '');
+  const enableBtn = el('button', { class: 'copy-btn', type: 'button' }, 'Enable notifications');
+
+  const refresh = () => {
+    const perm = notificationsPermission();
+    statusVal.textContent = statusText[perm] || perm;
+    enableBtn.style.display = perm === 'default' ? '' : 'none';
+  };
+  enableBtn.addEventListener('click', async () => {
+    await requestNotificationPermission();
+    refresh();
+  });
+  refresh();
+
+  return [
+    el('div', { class: 'settings-row' },
+      el('span', { class: 'settings-label' }, 'System notifications'),
+      statusVal,
+      enableBtn,
+    ),
+    el('div', { class: 'hint small' },
+      'Shows a system notification for new messages and incoming calls while the app is in the background. ' +
+      'Notifications work as long as the app tab is open — they are not delivered when the app is fully closed. ' +
+      'If blocked, re-enable them from your browser’s site settings.'),
+  ];
 }

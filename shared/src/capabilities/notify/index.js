@@ -31,6 +31,7 @@ let _pollTimer = null;
 let _ownCid = null;
 let _pollRunning = false;
 let _currentPollMs = POLL_MS_IDLE;
+let _visListener = null;
 
 /**
  * Avvia il polling dei pending senders + callers ogni 10s.
@@ -44,6 +45,13 @@ export function startPendingPoll(ownCid) {
   _poll();
 
   _pollTimer = setInterval(_poll, _currentPollMs);
+
+  // Re-poll immediato al ritorno visibile: i browser mobile throttlano/congelano
+  // i timer a pagina nascosta — al risveglio non aspettare il prossimo tick.
+  _visListener = () => {
+    if (document.visibilityState === 'visible' && _pollTimer) _poll();
+  };
+  document.addEventListener('visibilitychange', _visListener);
 }
 
 /** Ferma il polling (logout). */
@@ -51,6 +59,10 @@ export function stopPendingPoll() {
   if (_pollTimer) {
     clearInterval(_pollTimer);
     _pollTimer = null;
+  }
+  if (_visListener) {
+    document.removeEventListener('visibilitychange', _visListener);
+    _visListener = null;
   }
   _pendingCache.clear();
   _pendingCallCache.clear();

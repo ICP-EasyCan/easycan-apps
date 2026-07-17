@@ -46,6 +46,15 @@ type CanisterStatusType = variant {
   // The canister is running.
   running;
 };
+// Input dal frontend — senza id e timestamp (assegnati dal backend).
+type CreateInput = record { data : blob; namespace : text };
+type CrudRecord = record {
+  id : nat64;
+  updated_at : nat64;
+  data : blob;
+  created_at : nat64;
+  namespace : text;
+};
 // Contesto di derivazione — determina l'input per VetKeys.
 type DerivationContext = variant {
   // Chiave condivisa per conversazione con un peer.
@@ -57,7 +66,12 @@ type DerivationContext = variant {
   Custom : record { context : blob };
 };
 // Record restituito al destinatario.
-type FetchedMessage = record { id : nat64; timestamp : nat64; payload : blob };
+type FetchedMessage = record {
+  id : nat64;
+  edited : opt bool;
+  timestamp : nat64;
+  payload : blob;
+};
 type HttpRequest = record {
   url : text;
   method : text;
@@ -72,14 +86,17 @@ type HttpResponse = record {
 };
 // Risultato di leave_message — is_first per evitare notifiche ridondanti.
 type LeaveMessageResult = record { id : nat64; is_first : bool };
+// Risultato paginato di list_records.
+type ListResult = record { total : nat64; records : vec CrudRecord };
 type PresenceInfo = record { last_seen_ns : nat64; online : bool };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : nat64; Err : text };
-type Result_2 = variant { Ok : text; Err : text };
-type Result_3 = variant { Ok : PresenceInfo; Err : text };
-type Result_4 = variant { Ok : LeaveMessageResult; Err : text };
-type Result_5 = variant { Ok : principal; Err : text };
-type Result_6 = variant { Ok : Status; Err : text };
+type Result_2 = variant { Ok : CrudRecord; Err : text };
+type Result_3 = variant { Ok : text; Err : text };
+type Result_4 = variant { Ok : PresenceInfo; Err : text };
+type Result_5 = variant { Ok : LeaveMessageResult; Err : text };
+type Result_6 = variant { Ok : principal; Err : text };
+type Result_7 = variant { Ok : Status; Err : text };
 type SignalEntry = record {
   id : nat64;
   to : principal;
@@ -108,6 +125,8 @@ type Status = record {
   cycles : opt nat;
   module_hash : opt blob;
 };
+// Input per update — sovrascrive data, aggiorna updated_at.
+type UpdateInput = record { data : blob };
 type WebRtcSignalType = variant { Answer; Offer; IceCandidate };
 service : (principal, principal) -> {
   ack_messages : (vec nat64) -> (Result);
@@ -123,9 +142,18 @@ service : (principal, principal) -> {
   // orfani col bundle Vite (hash di contenuto diversi). Va seguito da upload_asset_batch + finalize.
   clear_assets : () -> (Result);
   clear_pending_caller : (principal) -> (Result);
+  // Owner/user spegne il flag di un mittente qualsiasi (caso esistente); un mittente
+  // autorizzato può spegnere SOLO il flag che ha acceso lui stesso (self-clear,
+  // F3 upgrade-messenger — annullamento notifica su delete_own_message).
   clear_pending_sender : (principal) -> (Result);
   count_my_messages : () -> (nat64) query;
-  derive_encrypted_key : (text, DerivationContext, blob) -> (Result_2);
+  count_records : (text) -> (nat64) query;
+  create_record : (CreateInput) -> (Result_2);
+  delete_archived_message : (principal, nat64) -> (Result);
+  delete_own_message : (nat64) -> (Result);
+  delete_record : (nat64) -> (Result);
+  derive_encrypted_key : (text, DerivationContext, blob) -> (Result_3);
+  edit_own_message : (nat64, blob) -> (Result);
   fetch_my_messages : () -> (vec FetchedMessage) query;
   finalize_assets : () -> (Result);
   get_all_persistent_chats : () -> (vec principal) query;
@@ -134,18 +162,24 @@ service : (principal, principal) -> {
   get_owner : () -> (principal) query;
   get_pending_callers : () -> (vec principal) query;
   get_pending_senders : () -> (vec principal) query;
-  get_presence : () -> (Result_3) query;
+  get_presence : () -> (Result_4) query;
+  get_record : (nat64) -> (opt CrudRecord) query;
   get_user_principal : () -> (opt principal) query;
-  get_verification_key : (text) -> (Result_2);
+  get_verification_key : (text) -> (Result_3);
   http_request : (HttpRequest) -> (HttpResponse) query;
   http_request_update : (HttpRequest) -> (HttpResponse);
   is_chat_persistent : (principal) -> (bool) query;
+  // Un peer può chiedere solo di sé stesso (`caller == peer`, pre-flight del
+  // mutual-contact check); owner/user vedono tutto. Terzi: sempre `false`,
+  // così la whitelist non è sondabile dall'esterno (grafo sociale).
   is_whitelisted : (principal) -> (bool) query;
-  leave_message : (principal, blob, nat64) -> (Result_4);
+  leave_message : (principal, blob, nat64) -> (Result_5);
+  list_records : (text, nat64, nat64) -> (ListResult) query;
   notify_pending_call : (principal) -> (Result);
   notify_pending_message : (principal) -> (Result);
+  pending_ids_for : (principal) -> (vec nat64) query;
   platform_add_controller : (principal) -> (Result);
-  platform_claim : (blob) -> (Result_5);
+  platform_claim : (blob) -> (Result_6);
   platform_cycles : () -> (nat) query;
   platform_eject : (bool) -> (Result);
   platform_get_admin : () -> (opt principal) query;
@@ -159,11 +193,12 @@ service : (principal, principal) -> {
   platform_set_private_ops : (bool) -> (Result);
   platform_set_status_viewers : (vec principal) -> (Result);
   platform_set_tier : (nat8, opt nat64) -> (Result);
-  platform_status : () -> (Result_6);
+  platform_status : () -> (Result_7);
   post_signal : (principal, WebRtcSignalType, text) -> (Result);
   remove_from_whitelist : (principal) -> (Result);
   set_chat_persistent : (principal, bool) -> (Result);
   set_presence : (bool) -> (Result);
+  update_record : (nat64, UpdateInput) -> (Result_2);
   upload_asset : (text, text, blob) -> (Result);
   upload_asset_batch : (vec record { text; text; blob }) -> (Result);
 }

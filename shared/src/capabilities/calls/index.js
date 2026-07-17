@@ -23,7 +23,7 @@ import { call, query } from '../../core/icp.js';
 import { ICE_SERVERS } from '../../core/config.js';
 import { bus } from '../../core/event-bus.js';
 import { CallError, classifyIcpError } from '../errors.js';
-import { acquireMic, addLocalTracks, attachRemoteAudio, cleanupMedia } from './media.js';
+import { acquireMic, addLocalTracks, attachRemoteAudio, cleanupMedia, tuneOpusSdp } from './media.js';
 import { setPollRate } from '../notify/index.js';
 
 // ─── Costanti ───────────────────────────────────────────────────────────────
@@ -49,6 +49,43 @@ let _isMuted = false;
 let _pendingOutbound = null;
 let _outboundCancelled = false;
 
+// ─── Screen Wake Lock ───────────────────────────────────────────────────────
+// Tiene lo schermo acceso durante TUTTA la chiamata, setup incluso (il caso
+// rotto è lo schermo che si spegne durante calling/incoming, non solo a
+// connected). Feature-detect + fail-silent: il wake lock non deve MAI far
+// fallire una chiamata. Inerte per le app che non usano le chiamate.
+
+let _wakeLock = null;
+let _wakeLockWanted = false;
+
+async function _acquireWakeLock() {
+  if (!('wakeLock' in navigator) || _wakeLock) return;
+  try {
+    const lock = await navigator.wakeLock.request('screen');
+    // Il sistema lo rilascia da solo a pagina hidden → azzera il riferimento
+    // così il visibilitychange sotto può ri-acquisire.
+    lock.addEventListener('release', () => { if (_wakeLock === lock) _wakeLock = null; });
+    if (!_wakeLockWanted) { lock.release().catch(() => {}); return; }
+    _wakeLock = lock;
+  } catch { /* browser vecchio, permesso negato, pagina hidden: pazienza */ }
+}
+
+function _releaseWakeLock() {
+  const lock = _wakeLock;
+  _wakeLock = null;
+  if (lock) {
+    try { lock.release().catch(() => {}); } catch { /* no-op */ }
+  }
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && _wakeLockWanted && !_wakeLock) {
+      _acquireWakeLock();
+    }
+  });
+}
+
 // ─── State machine ──────────────────────────────────────────────────────────
 
 function _setCallState(state, meta = {}) {
@@ -66,6 +103,10 @@ function _setCallState(state, meta = {}) {
     || state === CALL_STATES.incoming
     || state === CALL_STATES.connecting;
   setPollRate(transient ? 'fast' : 'idle');
+
+  // Wake lock: acceso per tutti gli stati di chiamata attiva, spento su ended/idle.
+  _wakeLockWanted = transient || state === CALL_STATES.connected;
+  if (_wakeLockWanted) _acquireWakeLock(); else _releaseWakeLock();
 
   // Auto-reset ended → idle dopo 3s
   if (state === CALL_STATES.ended) {
@@ -223,8 +264,12 @@ export async function initiateCall(ownCid, peerCid, peerPid, callerPid) {
 
     _setCallState(CALL_STATES.connecting, { peerCid, peerPid });
 
-    await pc.setRemoteDescription(JSON.parse(offerSignal.data));
+    // Tuning Opus su entrambe le description (i fmtp li legge il mittente dal remoto)
+    const remoteOffer = JSON.parse(offerSignal.data);
+    remoteOffer.sdp = tuneOpusSdp(remoteOffer.sdp);
+    await pc.setRemoteDescription(remoteOffer);
     const answer = await pc.createAnswer();
+    answer.sdp = tuneOpusSdp(answer.sdp);
     await pc.setLocalDescription(answer);
     await _waitIce(pc);
 
@@ -285,7 +330,9 @@ export async function acceptIncomingCall(ownCid, peerCid, peerPid) {
     _activeCall = { peerCid, peerPid, pc, dc, localStream, remoteAudio };
     _setupConnectionHandlers(pc);
 
+    // Tuning Opus su entrambe le description (i fmtp li legge il mittente dal remoto)
     const offer = await pc.createOffer();
+    offer.sdp = tuneOpusSdp(offer.sdp);
     await pc.setLocalDescription(offer);
     await _waitIce(pc);
 
@@ -306,7 +353,9 @@ export async function acceptIncomingCall(ownCid, peerCid, peerPid) {
       throw new CallError('peer_offline', 'The caller hung up before connecting.');
     }
 
-    await pc.setRemoteDescription(JSON.parse(answerSignal.data));
+    const remoteAnswer = JSON.parse(answerSignal.data);
+    remoteAnswer.sdp = tuneOpusSdp(remoteAnswer.sdp);
+    await pc.setRemoteDescription(remoteAnswer);
 
     // Cleanup fire-and-forget
     call(peerCid, 'ack_signals', [answerSignal.id]).catch(() => {});
@@ -412,6 +461,8 @@ bus.on('auth:logout', () => {
   _callMeta = {};
   _isMuted = false;
   _callStartTs = 0;
+  _wakeLockWanted = false;
+  _releaseWakeLock();
   if (_endedAutoIdleTimer) {
     clearTimeout(_endedAutoIdleTimer);
     _endedAutoIdleTimer = null;

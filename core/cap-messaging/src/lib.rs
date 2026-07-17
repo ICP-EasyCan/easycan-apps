@@ -40,6 +40,7 @@ struct OutboxMessage {
     pub payload: Vec<u8>,
     pub timestamp: u64,
     pub ttl_secs: u64,
+    pub edited: Option<bool>,
 }
 
 core_types::storable_candid!(OutboxMessage);
@@ -50,6 +51,7 @@ pub struct FetchedMessage {
     pub id: u64,
     pub payload: Vec<u8>,
     pub timestamp: u64,
+    pub edited: Option<bool>,
 }
 
 /// Risultato di leave_message — is_first per evitare notifiche ridondanti.
@@ -201,6 +203,7 @@ pub fn leave_message(
                 payload,
                 timestamp: ic_cdk::api::time(),
                 ttl_secs,
+                edited: None,
             },
         );
     });
@@ -224,6 +227,7 @@ pub fn fetch_my_messages(caller: Principal) -> Vec<FetchedMessage> {
                 id: msg.id,
                 payload: msg.payload.clone(),
                 timestamp: msg.timestamp,
+                edited: msg.edited,
             })
             .collect()
     })
@@ -261,4 +265,54 @@ pub fn ack_messages(caller: Principal, owner: Principal, ids: Vec<u64>) {
             }
         }
     });
+}
+
+/// Cancella un messaggio ancora nel proprio outbox (non ancora consegnato/ackato).
+/// Guardia (owner/user) va verificata dal canister host prima di chiamare.
+pub fn delete_own_message(id: u64) -> Result<(), String> {
+    let existed = with_outbox_mut(|outbox| outbox.remove(&id).is_some());
+    if existed {
+        Ok(())
+    } else {
+        Err("already delivered".to_string())
+    }
+}
+
+/// Sovrascrive il payload di un messaggio ancora in outbox e marca `edited`.
+/// Guardia (owner/user) va verificata dal canister host prima di chiamare.
+pub fn edit_own_message(id: u64, new_payload: Vec<u8>) -> Result<(), String> {
+    let max_payload = CONFIG.with(|c| c.borrow().max_payload_bytes);
+    if new_payload.len() > max_payload {
+        return Err(format!("Payload too large: max {max_payload} bytes"));
+    }
+    let found = with_outbox_mut(|outbox| {
+        if let Some(mut msg) = outbox.get(&id) {
+            msg.payload = new_payload;
+            msg.edited = Some(true);
+            outbox.insert(id, msg);
+            true
+        } else {
+            false
+        }
+    });
+    if found {
+        Ok(())
+    } else {
+        Err("already delivered".to_string())
+    }
+}
+
+/// Id dei messaggi ancora in outbox verso `to` (pendenti, non ancora consegnati/ackati).
+pub fn pending_ids_for(to: Principal) -> Vec<u64> {
+    let max_id = current_max_id();
+    with_outbox(|outbox| {
+        (0..max_id)
+            .filter(|id| {
+                outbox
+                    .get(id)
+                    .map(|msg| msg.to == to)
+                    .unwrap_or(false)
+            })
+            .collect()
+    })
 }

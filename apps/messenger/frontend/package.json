@@ -12,7 +12,10 @@
     "@dfinity/agent": "^3.4.3",
     "@dfinity/auth-client": "^3.4.3",
     "@dfinity/candid": "^3.4.3",
-    "@dfinity/principal": "^3.4.3"
+    "@dfinity/principal": "^3.4.3",
+    "@dfinity/vetkeys": "^0.3.0",
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4"
   },
   "devDependencies": {
     "@dfinity/identity-secp256k1": "^2.4.1",

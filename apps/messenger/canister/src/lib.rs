@@ -11,6 +11,7 @@ use std::time::Duration;
 
 // Re-export tipi Candid per export_candid!()
 use cap_archive::{ArchiveInput, ArchivedMessage};
+use cap_crud::{CreateInput, CrudRecord, ListResult, UpdateInput};
 use cap_crypto::DerivationContext;
 use cap_messaging::{FetchedMessage, LeaveMessageResult};
 use cap_presence::PresenceInfo;
@@ -86,6 +87,15 @@ fn init_all_storage() {
         get_mem(core_storage::ARCHIVE_COUNTER_MEM),
         get_mem(core_storage::ARCHIVE_PERSIST_FLAGS_MEM),
     );
+    cap_crud::init_storage(
+        get_mem(core_storage::CRUD_RECORDS_MEM),
+        get_mem(core_storage::CRUD_COUNTER_MEM),
+        get_mem(core_storage::CRUD_NS_INDEX_MEM),
+    );
+    cap_crud::configure(cap_crud::CrudConfig {
+        max_record_bytes: 65_536,
+        max_records_per_namespace: 10_000,
+    });
 }
 
 fn register_cleanups() {
@@ -239,6 +249,24 @@ fn ack_messages(ids: Vec<u64>) -> Result<(), String> {
     Ok(())
 }
 
+#[ic_cdk::update]
+fn delete_own_message(id: u64) -> Result<(), String> {
+    core_auth::require_owner_or_user(caller())?;
+    cap_messaging::delete_own_message(id)
+}
+
+#[ic_cdk::update]
+fn edit_own_message(id: u64, new_payload: Vec<u8>) -> Result<(), String> {
+    core_auth::require_owner_or_user(caller())?;
+    cap_messaging::edit_own_message(id, new_payload)
+}
+
+#[ic_cdk::query]
+fn pending_ids_for(to: Principal) -> Vec<u64> {
+    if core_auth::require_owner_or_user(caller()).is_err() { return vec![]; }
+    cap_messaging::pending_ids_for(to)
+}
+
 // ─── cap-signaling ──────────────────────────────────────────────────────────
 
 #[ic_cdk::update]
@@ -278,9 +306,18 @@ fn get_pending_senders() -> Vec<Principal> {
     cap_notify::get_pending_senders()
 }
 
+/// Owner/user spegne il flag di un mittente qualsiasi (caso esistente); un mittente
+/// autorizzato può spegnere SOLO il flag che ha acceso lui stesso (self-clear,
+/// F3 upgrade-messenger — annullamento notifica su delete_own_message).
 #[ic_cdk::update]
 fn clear_pending_sender(sender: Principal) -> Result<(), String> {
-    core_auth::require_owner_or_user(caller())?;
+    let c = caller();
+    if core_auth::require_owner_or_user(c).is_err() {
+        core_auth::require_authorized(c)?;
+        if sender != c {
+            return Err("Unauthorized: can only self-clear own flag".to_string());
+        }
+    }
     cap_notify::clear_pending_sender(sender);
     Ok(())
 }
@@ -342,6 +379,52 @@ fn is_chat_persistent(peer: Principal) -> bool {
 fn get_all_persistent_chats() -> Vec<Principal> {
     if core_auth::require_owner_or_user(caller()).is_err() { return vec![]; }
     cap_archive::get_all_persistent_chats()
+}
+
+#[ic_cdk::update]
+fn delete_archived_message(peer: Principal, id: u64) -> Result<(), String> {
+    core_auth::require_owner_or_user(caller())?;
+    cap_archive::delete_archived_message(peer, id)
+}
+
+// ─── cap-crud ───────────────────────────────────────────────────────────────
+
+#[ic_cdk::update]
+fn create_record(input: CreateInput) -> Result<CrudRecord, String> {
+    core_auth::require_owner_or_user(caller())?;
+    cap_crud::create_record(input)
+}
+
+#[ic_cdk::query]
+fn get_record(id: u64) -> Option<CrudRecord> {
+    if core_auth::require_owner_or_user(caller()).is_err() { return None; }
+    cap_crud::get_record(id)
+}
+
+#[ic_cdk::query]
+fn list_records(namespace: String, offset: u64, limit: u64) -> ListResult {
+    if core_auth::require_owner_or_user(caller()).is_err() {
+        return ListResult { records: vec![], total: 0 };
+    }
+    cap_crud::list_records(&namespace, offset, limit)
+}
+
+#[ic_cdk::update]
+fn update_record(id: u64, input: UpdateInput) -> Result<CrudRecord, String> {
+    core_auth::require_owner_or_user(caller())?;
+    cap_crud::update_record(id, input)
+}
+
+#[ic_cdk::update]
+fn delete_record(id: u64) -> Result<(), String> {
+    core_auth::require_owner_or_user(caller())?;
+    cap_crud::delete_record(id)
+}
+
+#[ic_cdk::query]
+fn count_records(namespace: String) -> u64 {
+    if core_auth::require_owner_or_user(caller()).is_err() { return 0; }
+    cap_crud::count_records(&namespace)
 }
 
 // ─── cap-crypto ─────────────────────────────────────────────────────────────

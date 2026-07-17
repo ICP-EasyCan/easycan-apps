@@ -23,6 +23,7 @@ import { startChatSession } from '@shared/capabilities/chat-session/index.js';
 import { checkPeerPresence, initiateCall, getActiveCall }
                             from '../connection-manager.js';
 import { getContactAlias }  from '../contacts-store.js';
+import { playMessage }      from '@shared/capabilities/sounds/index.js';
 
 // ─── Pagina chat ───────────────────────────────────────────────────────────
 
@@ -31,6 +32,11 @@ export function renderChat(container, param) {
   if (!peerCid || !peerPid) { navigate('#chats'); return; }
 
   let session = null;
+  // Beep solo sui messaggi arrivati DOPO l'avvio sessione: il replay della storia
+  // locale/archivio passa dallo stesso onMessage e non deve suonare.
+  let sessionLive = false;
+  // localId del messaggio in corso di modifica, null se non si sta modificando.
+  let editingLocalId = null;
 
   // ─── Header ──────────────────────────────────────────────────────────────
 
@@ -56,6 +62,10 @@ export function renderChat(container, param) {
   const msgList = el('div', { class: 'msg-list' });
   const inputField = el('input', { type: 'text', placeholder: 'Type a message...' });
   const sendBtn = el('button', { class: 'btn-icon', title: 'Send', onclick: handleSend }, '➤');
+  const editBanner = el('div', { class: 'chat-edit-banner', style: 'display:none;' },
+    el('span', {}, 'Editing message'),
+    el('button', { class: 'btn-icon', title: 'Cancel edit', onclick: cancelEdit }, '✕'),
+  );
 
   const headerAv = avatarEl(alias, peerPid);
   headerAv.classList.add('sm');
@@ -75,6 +85,7 @@ export function renderChat(container, param) {
         ),
       ),
       msgList,
+      editBanner,
       el('div', { class: 'chat-input' },
         inputField,
         sendBtn,
@@ -104,6 +115,7 @@ export function renderChat(container, param) {
     onPersistence: updatePinUI,
   }).then(s => {
     session = s;
+    sessionLive = true;
     pinBtn.onclick = async () => {
       if (!session) return;
       const allowed = await checkTier(CANISTER_ID, 1);
@@ -159,14 +171,63 @@ export function renderChat(container, param) {
   async function handleSend() {
     const text = inputField.value.trim();
     if (!text || !session) return;
+
+    if (editingLocalId) {
+      const localId = editingLocalId;
+      cancelEdit();
+      const ok = await session.editMessage(localId, text);
+      if (!ok) inputField.value = text; // fallito (es. consegnato nel frattempo) — non perdere il testo
+      return;
+    }
+
     inputField.value = '';
     await session.send(text);
+  }
+
+  // ─── Modifica ────────────────────────────────────────────────────────────
+
+  function startEdit(localId, text) {
+    editingLocalId = localId;
+    inputField.value = text;
+    inputField.focus();
+    editBanner.style.display = 'flex';
+    sendBtn.title = 'Save edit';
+  }
+
+  function cancelEdit() {
+    editingLocalId = null;
+    inputField.value = '';
+    editBanner.style.display = 'none';
+    sendBtn.title = 'Send';
+  }
+
+  // ─── Eliminazione ────────────────────────────────────────────────────────
+
+  async function handleDeleteForEveryone(localId) {
+    if (!session) return;
+    if (!window.confirm('Delete this message for everyone? The recipient will never see it.')) return;
+    const ok = await session.deleteMessage(localId);
+    if (ok) removeMessageNode(localId);
+  }
+
+  async function handleDeleteForMe(localId) {
+    if (!session) return;
+    if (!window.confirm('Delete this message for you? It stays visible to the other side if already delivered.')) return;
+    await session.deleteMessage(localId);
+    removeMessageNode(localId);
+  }
+
+  function removeMessageNode(localId) {
+    const node = msgList.querySelector(`[data-local-id="${localId}"]`);
+    if (node) node.remove();
   }
 
   // ─── Rendering ─────────────────────────────────────────────────────────
 
   function addMessage(from, text, time = new Date().toLocaleTimeString(), meta = {}) {
-    const { localId, status, errorCode, errorMessage } = meta;
+    const { localId, status, errorCode, errorMessage, delivery, edited } = meta;
+
+    if (from === 'peer' && sessionLive) playMessage();
 
     // If the message already exists in the DOM (re-render after retry/send),
     // replace it in place so the chat does not get duplicated.
@@ -186,6 +247,24 @@ export function renderChat(container, param) {
         status === 'sending' ? 'sending…' : time),
     ];
 
+    if (edited) {
+      children.push(el('span', { class: 'msg-edited' }, 'edited'));
+    }
+
+    // ✓/✓✓: solo per i propri messaggi risolti (non sending/failed). Copy
+    // onesto — ✓✓ significa "consegnato al dispositivo", mai "letto"; se
+    // scaduto (TTL 7gg senza essere stato consegnato) lo si dice esplicito
+    // invece di mostrare una spunta doppia falsa.
+    const isResolved = status !== 'sending' && status !== 'failed';
+    if (from === 'me' && isResolved && delivery) {
+      const tick = delivery === 'pending' ? '✓'
+        : delivery === 'expired' ? 'expired' : '✓✓';
+      const tickTitle = delivery === 'pending' ? 'Sent'
+        : delivery === 'expired' ? 'Expired after 7 days without being delivered'
+        : 'Delivered to device';
+      children.push(el('span', { class: `msg-tick msg-tick-${delivery}`, title: tickTitle }, tick));
+    }
+
     if (status === 'failed') {
       children.push(
         el('span', { class: 'msg-error' }, sendErrorMessage(errorCode, errorMessage)),
@@ -199,12 +278,38 @@ export function renderChat(container, param) {
             onclick: () => {
               if (!session) return;
               session.discard(localId);
-              const node = msgList.querySelector(`[data-local-id="${localId}"]`);
-              if (node) node.remove();
+              removeMessageNode(localId);
             },
           }, 'Discard'),
         ),
       );
+    } else if (isResolved && localId) {
+      if (from === 'me' && delivery === 'pending') {
+        children.push(
+          el('div', { class: 'msg-actions msg-actions-passive' },
+            el('button', {
+              class: 'msg-action-btn',
+              title: 'Edit',
+              onclick: () => startEdit(localId, text),
+            }, '✎'),
+            el('button', {
+              class: 'msg-action-btn msg-action-discard',
+              title: 'Delete for everyone',
+              onclick: () => handleDeleteForEveryone(localId),
+            }, '🗑'),
+          ),
+        );
+      } else {
+        children.push(
+          el('div', { class: 'msg-actions msg-actions-passive' },
+            el('button', {
+              class: 'msg-action-btn msg-action-discard',
+              title: 'Delete for me',
+              onclick: () => handleDeleteForMe(localId),
+            }, '🗑'),
+          ),
+        );
+      }
     }
 
     const msgEl = el('div', attrs, ...children);

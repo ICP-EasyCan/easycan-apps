@@ -259,6 +259,24 @@ pub fn get_archived_messages(peer: Principal) -> Vec<ArchivedMessage> {
     })
 }
 
+/// Cancella un singolo messaggio archiviato per `peer` (identificato per `id`).
+/// O(m) — range scan nel range del peer (cap max_messages_per_peer), niente indice per id.
+pub fn delete_archived_message(peer: Principal, id: u64) -> Result<(), String> {
+    let (start, end) = ArchiveKey::range_for_peer(peer);
+    let key = with_archive(|a| {
+        a.range(start..=end)
+            .find(|e| e.value().id == id)
+            .map(|e| e.key().clone())
+    });
+    match key {
+        Some(k) => {
+            with_archive_mut(|a| a.remove(&k));
+            Ok(())
+        }
+        None => Err("not found".to_string()),
+    }
+}
+
 /// Attiva/disattiva la persistenza per una chat.
 pub fn set_chat_persistent(peer: Principal, persistent: bool) {
     PERSIST_FLAGS.with(|p| {

@@ -39,6 +39,7 @@ export default defineConfig(() => {
         '@dfinity/candid',
         '@dfinity/principal',
         '@dfinity/identity',
+        '@dfinity/vetkeys',
       ],
       alias: {
         '@shared': sharedRoot,

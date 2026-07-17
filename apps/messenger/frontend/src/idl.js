@@ -24,6 +24,7 @@ const FetchedMessage = IDL.Record({
   id: IDL.Nat64,
   payload: IDL.Vec(IDL.Nat8),
   timestamp: IDL.Nat64,
+  edited: IDL.Opt(IDL.Bool),
 });
 
 const WebRtcSignalType = IDL.Variant({
@@ -52,6 +53,30 @@ const ArchivedMessage = IDL.Record({
   from_me: IDL.Bool,
   payload: IDL.Vec(IDL.Nat8),
   timestamp: IDL.Nat64,
+});
+
+const CrudRecord = IDL.Record({
+  id: IDL.Nat64,
+  namespace: IDL.Text,
+  data: IDL.Vec(IDL.Nat8),
+  created_at: IDL.Nat64,
+  updated_at: IDL.Nat64,
+});
+
+const ResultCrudRecord = IDL.Variant({ Ok: CrudRecord, Err: IDL.Text });
+
+const CreateInput = IDL.Record({
+  namespace: IDL.Text,
+  data: IDL.Vec(IDL.Nat8),
+});
+
+const UpdateInput = IDL.Record({
+  data: IDL.Vec(IDL.Nat8),
+});
+
+const ListResult = IDL.Record({
+  records: IDL.Vec(CrudRecord),
+  total: IDL.Nat64,
 });
 
 const DerivationContext = IDL.Variant({
@@ -98,6 +123,9 @@ export const idlFactory = () => IDL.Service({
   fetch_my_messages: IDL.Func([], [IDL.Vec(FetchedMessage)], ['query']),
   count_my_messages: IDL.Func([], [IDL.Nat64], ['query']),
   ack_messages:      IDL.Func([IDL.Vec(IDL.Nat64)], [Result], []),
+  delete_own_message: IDL.Func([IDL.Nat64], [Result], []),
+  edit_own_message:   IDL.Func([IDL.Nat64, IDL.Vec(IDL.Nat8)], [Result], []),
+  pending_ids_for:    IDL.Func([IDL.Principal], [IDL.Vec(IDL.Nat64)], ['query']),
 
   // Signaling
   post_signal:    IDL.Func([IDL.Principal, WebRtcSignalType, IDL.Text], [Result], []),
@@ -118,6 +146,15 @@ export const idlFactory = () => IDL.Service({
   set_chat_persistent:      IDL.Func([IDL.Principal, IDL.Bool], [Result], []),
   is_chat_persistent:       IDL.Func([IDL.Principal], [IDL.Bool], ['query']),
   get_all_persistent_chats: IDL.Func([], [IDL.Vec(IDL.Principal)], ['query']),
+  delete_archived_message:  IDL.Func([IDL.Principal, IDL.Nat64], [Result], []),
+
+  // cap-crud
+  create_record: IDL.Func([CreateInput], [ResultCrudRecord], []),
+  get_record:    IDL.Func([IDL.Nat64], [IDL.Opt(CrudRecord)], ['query']),
+  list_records:  IDL.Func([IDL.Text, IDL.Nat64, IDL.Nat64], [ListResult], ['query']),
+  update_record: IDL.Func([IDL.Nat64, UpdateInput], [ResultCrudRecord], []),
+  delete_record: IDL.Func([IDL.Nat64], [Result], []),
+  count_records: IDL.Func([IDL.Text], [IDL.Nat64], ['query']),
 
   // Crypto
   get_verification_key: IDL.Func([IDL.Text], [ResultText], []),
