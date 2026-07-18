@@ -84,6 +84,10 @@ export async function startChatSession(options) {
   let isLoading   = false;
   let pendingRetry = false;
   let _isPersistent = false;
+  // false finché la prima fetch non è completata: i messaggi di quel primo
+  // drain erano già pendenti all'apertura (l'utente è già stato notificato)
+  // → meta.live = false, non devono ri-suonare. Da lì in poi live = true.
+  let firstFetchDone = false;
   const shownIds        = new Set();
   const shownTimestamps = new Set();
   // localId → { msgId, timestamp, text } — messaggi propri ancora nel proprio
@@ -167,6 +171,8 @@ export async function startChatSession(options) {
 
     try {
       const msgs = await fetchMessages(peerCid);
+      const live = firstFetchDone;
+      firstFetchDone = true;
       if (msgs.length) {
         const ids = [];
         const newRecords = [];
@@ -179,7 +185,7 @@ export async function startChatSession(options) {
           if (!shownTimestamps.has(dedupKey)) {
             shownTimestamps.add(dedupKey);
             const localId = `peer-${msg.id}`;
-            onMessage('peer', msg.text, formatTime(msg.timestampMs), { localId, edited: msg.edited });
+            onMessage('peer', msg.text, formatTime(msg.timestampMs), { localId, edited: msg.edited, live });
 
             const record = { from: 'peer', text: msg.text, timestamp: msg.timestampMs, localId, edited: msg.edited };
             appendToLocalHistory(peerPid, record);

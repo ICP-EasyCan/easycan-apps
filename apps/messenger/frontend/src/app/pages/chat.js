@@ -8,6 +8,7 @@
  */
 
 import { CANISTER_ID }     from '@shared/core/config.js';
+import { bus }             from '@shared/core/event-bus.js';
 import { getPrincipalText } from '@shared/core/auth.js';
 import { CallError }        from '@shared/capabilities/errors.js';
 import { el, render, formatLastSeen }
@@ -32,11 +33,22 @@ export function renderChat(container, param) {
   if (!peerCid || !peerPid) { navigate('#chats'); return; }
 
   let session = null;
-  // Beep solo sui messaggi arrivati DOPO l'avvio sessione: il replay della storia
-  // locale/archivio passa dallo stesso onMessage e non deve suonare.
-  let sessionLive = false;
   // localId del messaggio in corso di modifica, null se non si sta modificando.
   let editingLocalId = null;
+
+  // Stop della sessione appena si lascia questa chat, per QUALSIASI via
+  // (back, bottom-nav, click su un'altra chat nel rail desktop, logout).
+  // Senza questo la sessione resta viva a pollare: consuma i messaggi del
+  // peer al posto di notify (niente pallino) e ruba i messaggi alla chat
+  // visibile scrivendoli in un DOM staccato.
+  const chatKey = `#chat/${peerCid}:${peerPid}`;
+  let leftChat = false;
+  const unsubRoute = bus.on('route:change', ({ hash }) => {
+    if (hash === chatKey) return;
+    leftChat = true;
+    unsubRoute();
+    if (session) session.stop();
+  });
 
   // ─── Header ──────────────────────────────────────────────────────────────
 
@@ -73,7 +85,7 @@ export function renderChat(container, param) {
   render(container,
     el('div', { class: 'page page-chat' },
       el('header', { class: 'topbar' },
-        el('button', { class: 'btn-icon', onclick: () => { if (session) session.stop(); navigate('#chats'); }, title: 'Back' }, '\u2190'),
+        el('button', { class: 'btn-icon', onclick: () => navigate('#chats'), title: 'Back' }, '\u2190'),
         headerAv,
         el('div', { class: 'chat-header-info' },
           el('span', { class: 'chat-header-name' }, alias),
@@ -115,7 +127,8 @@ export function renderChat(container, param) {
     onPersistence: updatePinUI,
   }).then(s => {
     session = s;
-    sessionLive = true;
+    // Navigato via prima che la sessione finisse di partire: spegnila subito.
+    if (leftChat) { s.stop(); return; }
     pinBtn.onclick = async () => {
       if (!session) return;
       const allowed = await checkTier(CANISTER_ID, 1);
@@ -225,9 +238,12 @@ export function renderChat(container, param) {
   // ─── Rendering ─────────────────────────────────────────────────────────
 
   function addMessage(from, text, time = new Date().toLocaleTimeString(), meta = {}) {
-    const { localId, status, errorCode, errorMessage, delivery, edited } = meta;
+    const { localId, status, errorCode, errorMessage, delivery, edited, live } = meta;
 
-    if (from === 'peer' && sessionLive) playMessage();
+    // Beep solo sui messaggi davvero nuovi (meta.live, escluso il drain
+    // iniziale: per quelli notify ha già suonato) e a pagina visibile
+    // (nascosta → suona il ramo notify in main.js, mai entrambi).
+    if (from === 'peer' && live && !document.hidden) playMessage();
 
     // If the message already exists in the DOM (re-render after retry/send),
     // replace it in place so the chat does not get duplicated.

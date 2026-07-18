@@ -28,7 +28,15 @@ export function fallback(handler) {
 }
 
 function dispatch() {
-  const hash = window.location.hash || '#login';
+  const hash = window.location.hash;
+
+  // Hash vuoto (es. PWA riaperta dallo start_url ".", o primo accesso senza
+  // fragment): decide il fallback dell'app, che è auth-aware. Difaultare a
+  // '#login' qui mostrerebbe il login anche con una sessione II ancora valida.
+  if (!hash) {
+    _fallback?.([hash]);
+    return;
+  }
 
   for (const [pattern, handler] of _routes) {
     if (pattern.endsWith('*')) {

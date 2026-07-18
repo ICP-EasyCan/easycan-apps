@@ -61,8 +61,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'messenger-v0.3.0',
-  releaseSha256: '4fc06b27151f283de6f235a1040664e93ab92f78907d7e2ee4166b416d1b1d57',
+  releaseTag: 'messenger-v0.3.1',
+  releaseSha256: 'e47ad5956eb6c5fdc87a6fc535b374974ce8372e0a6e0e42ecd0528e91f5f1e6',
   dockerPackage: 'messenger-canister',
   e2eeFrontend: false,      // messenger NON è E2EE
 };
@@ -107,7 +107,9 @@ async function boot() {
   };
 
   // ─── Routing (le pagine renderizzano dentro routeContainer) ─────────────
-  route('#login',         () => renderLogin(routeContainer));
+  // Se la sessione II è ancora valida, #login (es. URL ripristinato dalla PWA)
+  // non deve chiedere un login inutile: si entra direttamente.
+  route('#login',         () => isAuthenticated() ? navigate('#chats') : renderLogin(routeContainer));
   route('#not-owner',     () => renderNotOwner(routeContainer));
   route('#verify-failed', () => renderVerifyFailed(routeContainer));
   route('#chats',         () => requireAuth(() => renderChats(routeContainer)));
@@ -191,8 +193,17 @@ async function boot() {
     const newSenders = [...senders].filter(pid => !knownSenders.has(pid));
     knownSenders = new Set(senders);
     if (newSenders.length === 0) return;
+    // Il sender della chat aperta e visibile non suona da qui: il suo beep lo
+    // fa la chat stessa quando il messaggio compare (meta.live). Evita il
+    // doppio suono quando il tick di notify batte il poll della sessione.
+    const hash = window.location.hash;
+    const openChatPid = (!document.hidden && hash.startsWith('#chat/') && hash.includes(':'))
+      ? hash.slice(hash.indexOf(':') + 1)
+      : null;
+    const audible = newSenders.filter(pid => pid !== openChatPid);
+    if (audible.length === 0) return;
     playMessage();
-    for (const pid of newSenders) {
+    for (const pid of audible) {
       const contact = getContactByPrincipal(pid);
       maybeNotify({
         title: 'New message',

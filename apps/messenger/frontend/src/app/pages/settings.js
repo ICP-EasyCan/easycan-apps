@@ -10,7 +10,8 @@ import { el }                                from '@shared/ui/dom.js';
 import { CANISTER_ID }                       from '@shared/core/config.js';
 import { isEnabled as soundsEnabled, setEnabled as setSoundsEnabled }
                                              from '@shared/capabilities/sounds/index.js';
-import { notificationsPermission, requestNotificationPermission }
+import { notificationsPermission, requestNotificationPermission,
+         isEnabled as notifEnabled, setEnabled as setNotifEnabled }
                                              from '../lib/notifications.js';
 
 export function renderSettings(container) {
@@ -79,18 +80,25 @@ function soundsToggleRow() {
 }
 
 function notificationsSection() {
+  // 3 stati: permesso `default` → bottone Enable; `granted` → checkbox sul flag
+  // app (il permesso browser non è revocabile da JS); denied/unsupported → testo.
   const statusText = {
-    granted:     'Enabled',
     denied:      'Blocked in the browser',
     default:     'Not enabled',
     unsupported: 'Not supported by this browser',
   };
   const statusVal = el('span', { class: 'settings-value small' }, '');
   const enableBtn = el('button', { class: 'copy-btn', type: 'button' }, 'Enable notifications');
+  const checkbox  = el('input', { type: 'checkbox' });
+  checkbox.checked = notifEnabled();
+  checkbox.onchange = () => setNotifEnabled(checkbox.checked);
 
   const refresh = () => {
     const perm = notificationsPermission();
-    statusVal.textContent = statusText[perm] || perm;
+    const granted = perm === 'granted';
+    statusVal.textContent   = granted ? '' : (statusText[perm] || perm);
+    statusVal.style.display = granted ? 'none' : '';
+    checkbox.style.display  = granted ? '' : 'none';
     enableBtn.style.display = perm === 'default' ? '' : 'none';
   };
   enableBtn.addEventListener('click', async () => {
@@ -103,6 +111,7 @@ function notificationsSection() {
     el('div', { class: 'settings-row' },
       el('span', { class: 'settings-label' }, 'System notifications'),
       statusVal,
+      checkbox,
       enableBtn,
     ),
     el('div', { class: 'hint small' },
