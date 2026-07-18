@@ -103,7 +103,11 @@ fn register_cleanups() {
     core_timer::register_cleanup(|| cap_presence::cleanup_stale());
     core_timer::register_cleanup(|| cap_messaging::cleanup_expired());
     core_timer::register_cleanup(|| cap_signaling::cleanup_expired());
-    core_timer::schedule(Duration::from_secs(120));
+    // Tick di sola pulizia-memoria (netturbino): la correttezza è sempre in lettura
+    // (fetch_my_messages / get_my_signals filtrano lo scaduto; get_presence calcola
+    // la staleness a read-time dopo Fase A). 1h ≫ del bisogno (msg TTL 7g) e taglia
+    // ~87% del floor idle (timer era ~11,75B/day su ~13B). Vedi messenger_cycles_saving §Fase B.
+    core_timer::schedule(Duration::from_secs(3600));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -126,9 +126,9 @@ pub struct AppMetadata {
 ///   codice). `None` solo se il canister e' vuoto.
 /// - `controllers`: viewer-gated SEMPRE (unico campo correlante). `None` per i
 ///   non-viewer.
-/// - `status`/`cycles`/`memory_size`/`freezing_threshold`: pubblici per default;
-///   `None` per i non-viewer SOLO se `private_ops` e' acceso (opacita' sovrana
-///   senza danno a terzi).
+/// - `status`/`cycles`/`memory_size`/`freezing_threshold`/`idle_cycles_burned_per_day`:
+///   pubblici per default; `None` per i non-viewer SOLO se `private_ops` e' acceso
+///   (opacita' sovrana senza danno a terzi).
 #[derive(CandidType, Deserialize, Clone, Debug)]
 pub struct Status {
     pub module_hash: Option<Vec<u8>>,
@@ -137,6 +137,10 @@ pub struct Status {
     pub cycles: Option<candid::Nat>,
     pub memory_size: Option<candid::Nat>,
     pub freezing_threshold: Option<candid::Nat>,
+    /// Burn di sistema in idle (storage/memoria/allocazioni) — ESCLUDE l'esecuzione
+    /// e l'attivita'. Alimenta la stima "giorni di autonomia in idle" della dashboard
+    /// sovrana. Ops-gated come gli altri operativi.
+    pub idle_cycles_burned_per_day: Option<candid::Nat>,
 }
 
 // ─── Storage ────────────────────────────────────────────────────────────────
@@ -543,6 +547,7 @@ fn redact_status(
     cycles: candid::Nat,
     memory_size: candid::Nat,
     freezing_threshold: candid::Nat,
+    idle_cycles_burned_per_day: candid::Nat,
 ) -> Status {
     let is_viewer = is_status_viewer(caller, state);
     let private_ops = state.private_ops.unwrap_or(false);
@@ -557,6 +562,11 @@ fn redact_status(
         cycles: if ops_visible { Some(cycles) } else { None },
         memory_size: if ops_visible { Some(memory_size) } else { None },
         freezing_threshold: if ops_visible { Some(freezing_threshold) } else { None },
+        idle_cycles_burned_per_day: if ops_visible {
+            Some(idle_cycles_burned_per_day)
+        } else {
+            None
+        },
     }
 }
 
@@ -581,6 +591,7 @@ pub async fn status(caller: Principal) -> Result<Status, String> {
         result.cycles,
         result.memory_size,
         result.settings.freezing_threshold,
+        result.idle_cycles_burned_per_day,
     ))
 }
 
@@ -1319,6 +1330,7 @@ mod tests {
             candid::Nat::from(1_000u64),  // cycles
             candid::Nat::from(2_000u64),  // memory_size
             candid::Nat::from(3_000u64),  // freezing_threshold
+            candid::Nat::from(4_000u64),  // idle_cycles_burned_per_day
         )
     }
 
@@ -1350,6 +1362,7 @@ mod tests {
         assert!(s.cycles.is_some());
         assert!(s.memory_size.is_some());
         assert!(s.freezing_threshold.is_some());
+        assert!(s.idle_cycles_burned_per_day.is_some());
         assert!(s.controllers.is_none());
     }
 
@@ -1365,6 +1378,7 @@ mod tests {
         assert!(s.cycles.is_none());
         assert!(s.memory_size.is_none());
         assert!(s.freezing_threshold.is_none());
+        assert!(s.idle_cycles_burned_per_day.is_none());
         // Viewer (admin): vede tutto anche con private_ops on.
         let full = redact_for(p(30), &state);
         assert!(full.controllers.is_some());

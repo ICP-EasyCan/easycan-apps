@@ -14,7 +14,7 @@
 
 import { el, render }            from '../../ui/dom.js';
 import { getPrincipalText, logout } from '../../core/auth.js';
-import { loadCanisterHealth, formatCycles, formatBytes } from './canister-health.js';
+import { loadCanisterHealth, formatCycles, formatBytes, formatBurnPerDay, formatAutonomyDays } from './canister-health.js';
 
 /**
  * @param {HTMLElement} container
@@ -63,15 +63,21 @@ export function renderSettings(container, options = {}) {
 
   // ── Canister (cicli + memoria): valori riempiti async dopo il render ──
   // È il carburante e l'impronta del canister sovrano: "il tuo computer, la sua benzina".
-  let cyclesVal, memVal;
+  let cyclesVal, memVal, burnVal, autonomyVal;
   if (showCanisterHealth) {
-    cyclesVal = el('span', { class: 'settings-value mono small' }, '…');
-    memVal    = el('span', { class: 'settings-value mono small' }, '…');
+    cyclesVal    = el('span', { class: 'settings-value mono small' }, '…');
+    memVal       = el('span', { class: 'settings-value mono small' }, '…');
+    burnVal      = el('span', { class: 'settings-value mono small' }, '…');
+    autonomyVal  = el('span', { class: 'settings-value mono small' }, '…');
     sections.push(
       el('div', { class: 'settings-section' },
         el('h3', {}, 'Canister'),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Cycles'), cyclesVal),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Memory'), memVal),
+        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Consumo idle'), burnVal),
+        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Autonomia (idle)'), autonomyVal),
+        el('p', { class: 'settings-hint small' },
+          'Stima in idle: esclude l’uso attivo (chiamate, messaggi). È il massimo teorico, non il consumo reale.'),
       ),
     );
   }
@@ -106,10 +112,15 @@ export function renderSettings(container, options = {}) {
 
   if (showCanisterHealth) {
     loadCanisterHealth(canisterId)
-      .then(({ cycles, memoryBytes }) => {
-        cyclesVal.textContent = formatCycles(cycles);
-        memVal.textContent    = formatBytes(memoryBytes);
+      .then(({ cycles, memoryBytes, idleBurnPerDay }) => {
+        cyclesVal.textContent   = formatCycles(cycles);
+        memVal.textContent      = formatBytes(memoryBytes);
+        burnVal.textContent     = formatBurnPerDay(idleBurnPerDay);
+        autonomyVal.textContent = formatAutonomyDays(cycles, idleBurnPerDay);
       })
-      .catch(() => { cyclesVal.textContent = 'n/d'; memVal.textContent = 'n/d'; });
+      .catch(() => {
+        cyclesVal.textContent = 'n/d'; memVal.textContent = 'n/d';
+        burnVal.textContent = 'n/d'; autonomyVal.textContent = 'n/d';
+      });
   }
 }

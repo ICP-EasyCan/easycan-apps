@@ -114,15 +114,19 @@ type SignalEntry = record {
 // codice). `None` solo se il canister e' vuoto.
 // - `controllers`: viewer-gated SEMPRE (unico campo correlante). `None` per i
 // non-viewer.
-// - `status`/`cycles`/`memory_size`/`freezing_threshold`: pubblici per default;
-// `None` per i non-viewer SOLO se `private_ops` e' acceso (opacita' sovrana
-// senza danno a terzi).
+// - `status`/`cycles`/`memory_size`/`freezing_threshold`/`idle_cycles_burned_per_day`:
+// pubblici per default; `None` per i non-viewer SOLO se `private_ops` e' acceso
+// (opacita' sovrana senza danno a terzi).
 type Status = record {
   status : opt CanisterStatusType;
   freezing_threshold : opt nat;
   controllers : opt vec principal;
   memory_size : opt nat;
   cycles : opt nat;
+  // Burn di sistema in idle (storage/memoria/allocazioni) — ESCLUDE l'esecuzione
+  // e l'attivita'. Alimenta la stima "giorni di autonomia in idle" della dashboard
+  // sovrana. Ops-gated come gli altri operativi.
+  idle_cycles_burned_per_day : opt nat;
   module_hash : opt blob;
 };
 // Input per update — sovrascrive data, aggiorna updated_at.

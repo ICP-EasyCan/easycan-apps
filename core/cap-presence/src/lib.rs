@@ -147,12 +147,27 @@ pub fn set_presence(online: bool) {
     });
 }
 
-/// Ritorna la presenza attuale. Il canister host deve verificare require_authorized.
+/// Ritorna la presenza attuale, con staleness calcolata **in lettura**: se `online`
+/// ma l'ultimo heartbeat supera `stale_threshold_ns`, riporta `offline` senza
+/// scrivere (resta query gratis). Così il badge è esatto-a-soglia e indipendente
+/// dalla frequenza del timer di cleanup — stessa logica di `cleanup_stale`, ma
+/// autorevole al momento della lettura. `last_seen_ns` resta quello reale.
+/// Il canister host deve verificare require_authorized.
 pub fn get_presence() -> PresenceInfo {
+    let now = ic_cdk::api::time();
+    let threshold = CONFIG.with(|c| c.borrow().stale_threshold_ns);
     with_presence(|map| {
-        map.get(&0u8).unwrap_or(PresenceInfo {
+        let info = map.get(&0u8).unwrap_or(PresenceInfo {
             online: false,
             last_seen_ns: 0,
-        })
+        });
+        if info.online && now.saturating_sub(info.last_seen_ns) > threshold {
+            PresenceInfo {
+                online: false,
+                last_seen_ns: info.last_seen_ns,
+            }
+        } else {
+            info
+        }
     })
 }

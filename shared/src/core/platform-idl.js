@@ -44,6 +44,7 @@ export const Status = IDL.Record({
   cycles: IDL.Opt(IDL.Nat),
   memory_size: IDL.Opt(IDL.Nat),
   freezing_threshold: IDL.Opt(IDL.Nat),
+  idle_cycles_burned_per_day: IDL.Opt(IDL.Nat),
 });
 
 /**
