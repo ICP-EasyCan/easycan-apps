@@ -19,10 +19,12 @@
  * "risorgerebbe" al riavvio successivo.
  *
  * `initContacts(actor)` va chiamata una volta dopo il login (come
- * initSounds/initCallBanner in main.js): deriva la chiave VetKeys, scarica
- * e decifra la rubrica dal canister, la fonde con quella locale (unione per
- * canisterId, mai overwrite — gira su ogni dispositivo) e marca l'import
- * come fatto con `sm_contacts_imported_v1`.
+ * initSounds/initCallBanner in main.js): scarica la lista dal canister e la
+ * fonde con quella locale (unione per canisterId, mai overwrite — gira su ogni
+ * dispositivo). Il diff usa il canisterId in chiaro dell'outer, così la chiave
+ * VetKeys viene derivata SOLO se c'è almeno un contatto remoto non ancora in
+ * locale (lazy): a cold-open senza modifiche = zero derive, zero picco ~10B.
+ * Marca l'import one-shot con `sm_contacts_imported_v1`.
  *
  * Formato record su cap-crud (namespace "contacts"): il blob è JSON
  * `{ v:1, canisterId:"<in chiaro>", envelope:"<base64 di encryptString>" }`
@@ -164,8 +166,22 @@ async function _encodeRecord(actor, contact) {
   return new TextEncoder().encode(JSON.stringify(outer));
 }
 
-async function _decodeRecord(actor, bytes) {
+/**
+ * Parse del SOLO blob esterno (JSON in chiaro `{ v, canisterId, envelope }`) —
+ * nessuna derivazione VetKey, nessun decrypt. Serve al flusso lazy di
+ * initContacts per conoscere canisterId + id cap-crud di ogni record senza
+ * pagare la derive (~10B) a ogni login.
+ */
+function _decodeOuter(bytes) {
   const outer = JSON.parse(new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)));
+  return { canisterId: outer.canisterId, envelope: outer.envelope };
+}
+
+/**
+ * Decifra l'envelope di un outer già parsato (deriva la chiave — costo VetKey).
+ * Da chiamare SOLO quando il record serve davvero (contatto mancante in locale).
+ */
+async function _decryptEnvelope(actor, outer) {
   const key = await _keyFor(actor);
   const inner = JSON.parse(await decryptString(fromB64(outer.envelope), key));
   return {
@@ -211,36 +227,48 @@ export function resetContactsSession() {
 
 /**
  * Da chiamare una volta dopo il login (actor col canister proprio già wired
- * su cap-crud + cap-crypto). Idrata la cache dal canister e, al primo avvio
- * su QUESTO dispositivo, fonde i contatti locali pre-esistenti verso il
- * canister (unione per canisterId, mai overwrite).
+ * su cap-crud + cap-crypto). Idrata la cache dal canister in modo lazy (deriva
+ * la chiave solo per i record mancanti in locale) e, al primo avvio su QUESTO
+ * dispositivo, fonde i contatti locali pre-esistenti verso il canister
+ * (unione per canisterId, mai overwrite).
  * @param {object} actor
  */
 export async function initContacts(actor) {
   _actor = actor;
   const contacts = _ensureCache();
 
-  let remoteContacts = [];
   const tombstones = _readTombstones();
+  // Record remoti da decifrare: SOLO quelli non già in cache locale. Il diff
+  // si fa sul canisterId in chiaro (outer), quindi a cold-open senza modifiche
+  // resta vuoto → zero derive VetKey → nessun picco ~10B (piano A1, lazy).
+  const missing = []; // { rec, outer }
   try {
     const result = await actor.list_records(NS, 0n, BigInt(LIST_LIMIT));
     for (const rec of result.records) {
+      let outer;
       try {
-        const decoded = await _decodeRecord(actor, rec.data);
-        if (tombstones.includes(decoded.canisterId)) {
-          // Rimosso su questo dispositivo con delete remota fallita: applica ora.
-          try {
-            await _deleteOnCanister(rec.id);
-            _removeTombstone(decoded.canisterId);
-          } catch (e) {
-            console.warn(`[contacts] tombstone delete failed for ${decoded.canisterId}:`, e.message);
-          }
-          continue;
-        }
-        remoteContacts.push(decoded);
-        _idByCanister.set(decoded.canisterId, rec.id);
+        outer = _decodeOuter(rec.data);
       } catch (e) {
-        console.warn(`[contacts] decrypt failed for record ${rec.id}:`, e.message);
+        console.warn(`[contacts] outer parse failed for record ${rec.id}:`, e.message);
+        continue;
+      }
+      const canisterId = outer.canisterId;
+      if (!canisterId) continue; // formato inatteso: salta senza derivare
+      if (tombstones.includes(canisterId)) {
+        // Rimosso su questo dispositivo con delete remota fallita: applica ora (no decrypt).
+        try {
+          await _deleteOnCanister(rec.id);
+          _removeTombstone(canisterId);
+        } catch (e) {
+          console.warn(`[contacts] tombstone delete failed for ${canisterId}:`, e.message);
+        }
+        continue;
+      }
+      // Mappa id per TUTTI i record vivi (abilita update/delete futuri senza derivare).
+      _idByCanister.set(canisterId, rec.id);
+      // Decifra solo i contatti non ancora presenti in locale.
+      if (!contacts.some(c => c.canisterId === canisterId)) {
+        missing.push({ rec, outer });
       }
     }
   } catch (e) {
@@ -248,12 +276,18 @@ export async function initContacts(actor) {
     return;
   }
 
-  // Unione canister → locale: aggiunge solo i contatti mancanti, mai overwrite.
+  // Deriva la chiave UNA volta e decifra SOLO i mancanti (se `missing` è vuoto,
+  // nessuna derive). Unione: aggiunge solo i mancanti, mai overwrite.
   let changed = false;
-  for (const rc of remoteContacts) {
-    if (!contacts.some(c => c.canisterId === rc.canisterId)) {
-      contacts.push(rc);
-      changed = true;
+  for (const { rec, outer } of missing) {
+    try {
+      const decoded = await _decryptEnvelope(actor, outer);
+      if (!contacts.some(c => c.canisterId === decoded.canisterId)) {
+        contacts.push(decoded);
+        changed = true;
+      }
+    } catch (e) {
+      console.warn(`[contacts] decrypt failed for record ${rec.id}:`, e.message);
     }
   }
   if (changed) _persist();

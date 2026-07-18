@@ -61,8 +61,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'messenger-v0.3.1',
-  releaseSha256: 'e47ad5956eb6c5fdc87a6fc535b374974ce8372e0a6e0e42ecd0528e91f5f1e6',
+  releaseTag: 'messenger-v0.3.2',
+  releaseSha256: 'c8c8d7d1cc7ebce1637e9921eb3f9e1785342afe5e8475c05af8b392be5e3d4a',
   dockerPackage: 'messenger-canister',
   e2eeFrontend: false,      // messenger NON è E2EE
 };

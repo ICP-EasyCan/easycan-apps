@@ -116,27 +116,15 @@ fn next_id() -> u64 {
     })
 }
 
-fn current_max_id() -> u64 {
-    COUNTER.with(|c| {
-        c.borrow()
-            .as_ref()
-            .expect("cap-messaging: init_storage() not called")
-            .current()
-    })
-}
-
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
 fn count_pending_for(recipient: Principal) -> u64 {
-    let max_id = current_max_id();
+    // .iter() cammina solo le entry vive (O(vive)), non 0..max_id (O(id storici)):
+    // il counter è monotono e non decresce, ma le entry rimosse non ci sono più.
     with_outbox(|outbox| {
-        (0..max_id)
-            .filter(|id| {
-                outbox
-                    .get(id)
-                    .map(|msg| msg.to == recipient)
-                    .unwrap_or(false)
-            })
+        outbox
+            .iter()
+            .filter(|e| e.value().to == recipient)
             .count() as u64
     })
 }
@@ -146,15 +134,18 @@ fn count_pending_for(recipient: Principal) -> u64 {
 /// Rimuove messaggi scaduti. Registrare in core-timer.
 pub fn cleanup_expired() {
     let now = ic_cdk::api::time();
-    let max_id = current_max_id();
 
+    // Raccoglie le chiavi scadute PRIMA di rimuovere (non mutare durante l'iterazione).
     let expired: Vec<u64> = with_outbox(|outbox| {
-        (0..max_id)
-            .filter(|id| {
-                outbox
-                    .get(id)
-                    .map(|msg| now > msg.timestamp + msg.ttl_secs * 1_000_000_000)
-                    .unwrap_or(false)
+        outbox
+            .iter()
+            .filter_map(|e| {
+                let msg = e.value();
+                if now > msg.timestamp + msg.ttl_secs * 1_000_000_000 {
+                    Some(*e.key())
+                } else {
+                    None
+                }
             })
             .collect()
     });
@@ -214,20 +205,23 @@ pub fn leave_message(
 /// Il canister host deve verificare is_authorized prima di chiamare.
 pub fn fetch_my_messages(caller: Principal) -> Vec<FetchedMessage> {
     let now = ic_cdk::api::time();
-    let max_id = current_max_id();
 
     with_outbox(|outbox| {
-        (0..max_id)
-            .filter_map(|id| outbox.get(&id))
-            .filter(|msg| {
+        outbox
+            .iter()
+            .filter_map(|e| {
+                let msg = e.value();
                 let not_expired = now <= msg.timestamp + msg.ttl_secs * 1_000_000_000;
-                msg.to == caller && not_expired
-            })
-            .map(|msg| FetchedMessage {
-                id: msg.id,
-                payload: msg.payload.clone(),
-                timestamp: msg.timestamp,
-                edited: msg.edited,
+                if msg.to == caller && not_expired {
+                    Some(FetchedMessage {
+                        id: msg.id,
+                        payload: msg.payload,
+                        timestamp: msg.timestamp,
+                        edited: msg.edited,
+                    })
+                } else {
+                    None
+                }
             })
             .collect()
     })
@@ -236,18 +230,13 @@ pub fn fetch_my_messages(caller: Principal) -> Vec<FetchedMessage> {
 /// Conta i messaggi non letti per `caller`.
 pub fn count_my_messages(caller: Principal) -> u64 {
     let now = ic_cdk::api::time();
-    let max_id = current_max_id();
 
     with_outbox(|outbox| {
-        (0..max_id)
-            .filter(|id| {
-                outbox
-                    .get(id)
-                    .map(|msg| {
-                        msg.to == caller
-                            && now <= msg.timestamp + msg.ttl_secs * 1_000_000_000
-                    })
-                    .unwrap_or(false)
+        outbox
+            .iter()
+            .filter(|e| {
+                let msg = e.value();
+                msg.to == caller && now <= msg.timestamp + msg.ttl_secs * 1_000_000_000
             })
             .count() as u64
     })
@@ -304,15 +293,10 @@ pub fn edit_own_message(id: u64, new_payload: Vec<u8>) -> Result<(), String> {
 
 /// Id dei messaggi ancora in outbox verso `to` (pendenti, non ancora consegnati/ackati).
 pub fn pending_ids_for(to: Principal) -> Vec<u64> {
-    let max_id = current_max_id();
     with_outbox(|outbox| {
-        (0..max_id)
-            .filter(|id| {
-                outbox
-                    .get(id)
-                    .map(|msg| msg.to == to)
-                    .unwrap_or(false)
-            })
+        outbox
+            .iter()
+            .filter_map(|e| if e.value().to == to { Some(*e.key()) } else { None })
             .collect()
     })
 }

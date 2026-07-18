@@ -110,29 +110,22 @@ fn next_id() -> u64 {
     })
 }
 
-fn current_max_id() -> u64 {
-    COUNTER.with(|c| {
-        c.borrow()
-            .as_ref()
-            .expect("cap-signaling: init_storage() not called")
-            .current()
-    })
-}
-
 // ─── Cleanup ────────────────────────────────────────────────────────────────
 
 pub fn cleanup_expired() {
     let now = ic_cdk::api::time();
     let ttl = CONFIG.with(|c| c.borrow().signal_ttl_ns);
-    let max_id = current_max_id();
 
+    // Raccoglie le chiavi scadute PRIMA di rimuovere (non mutare durante l'iterazione).
     let expired: Vec<u64> = with_signals(|signals| {
-        (0..max_id)
-            .filter(|id| {
-                signals
-                    .get(id)
-                    .map(|e| now.saturating_sub(e.timestamp) > ttl)
-                    .unwrap_or(false)
+        signals
+            .iter()
+            .filter_map(|e| {
+                if now.saturating_sub(e.value().timestamp) > ttl {
+                    Some(*e.key())
+                } else {
+                    None
+                }
             })
             .collect()
     });
@@ -166,15 +159,13 @@ pub fn post_signal(
     }
 
     let now = ic_cdk::api::time();
-    let max_id = current_max_id();
 
     let count = with_signals(|signals| {
-        (0..max_id)
-            .filter(|id| {
-                signals
-                    .get(id)
-                    .map(|e| e.to == to && now.saturating_sub(e.timestamp) <= ttl)
-                    .unwrap_or(false)
+        signals
+            .iter()
+            .filter(|entry| {
+                let e = entry.value();
+                e.to == to && now.saturating_sub(e.timestamp) <= ttl
             })
             .count()
     });
@@ -202,12 +193,18 @@ pub fn post_signal(
 pub fn get_my_signals(caller: Principal) -> Vec<SignalEntry> {
     let now = ic_cdk::api::time();
     let ttl = CONFIG.with(|c| c.borrow().signal_ttl_ns);
-    let max_id = current_max_id();
 
     with_signals(|signals| {
-        (0..max_id)
-            .filter_map(|id| signals.get(&id))
-            .filter(|e| e.to == caller && now.saturating_sub(e.timestamp) <= ttl)
+        signals
+            .iter()
+            .filter_map(|entry| {
+                let e = entry.value();
+                if e.to == caller && now.saturating_sub(e.timestamp) <= ttl {
+                    Some(e)
+                } else {
+                    None
+                }
+            })
             .collect()
     })
 }
