@@ -213,7 +213,7 @@ export async function runHandoffInstall({ canisterId, repo, distBranch = 'dist',
     if (!pf.hashMatches) {
       throw new Error(
         `Manifest hash does not match the on-chain record — refusing to install ` +
-        `(on-chain ${pf.onChainSha256 || 'n/d'}, manifest ${pf.manifestSha256 || 'n/d'}).`);
+        `(on-chain ${pf.onChainSha256 || 'n/a'}, manifest ${pf.manifestSha256 || 'n/a'}).`);
     }
 
     // ── PEEK read-only: app_id autentico, NIENTE burn / NIENTE spostamento occupancy.

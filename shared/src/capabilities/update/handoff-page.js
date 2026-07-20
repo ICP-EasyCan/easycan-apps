@@ -175,7 +175,7 @@ export function mountInstallPage(container, { canisterId, repo, distBranch = 'di
           'This release does not match the code hash recorded on-chain, so it will not be ' +
           'installed. Your current app is untouched.'),
         el('p', { class: 'settings-note small muted', style: 'word-break: break-all; opacity: 0.75;' },
-          `on-chain ${pf.onChainSha256 || 'n/d'} · manifest ${pf.manifestSha256 || 'n/d'}`));
+          `on-chain ${pf.onChainSha256 || 'n/a'} · manifest ${pf.manifestSha256 || 'n/a'}`));
       return;
     }
     // Pre-flight non riuscito (rete, manifest assente, ecc.): bloccato, ma nulla toccato.

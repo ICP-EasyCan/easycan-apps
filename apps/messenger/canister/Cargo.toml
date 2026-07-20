@@ -1,6 +1,6 @@
 [package]
 name = "messenger-canister"
-version = "0.3.3"
+version = "0.3.4"
 edition = "2021"
 
 [lib]
@@ -27,7 +27,6 @@ cap-messaging.workspace = true
 cap-signaling.workspace = true
 cap-notify.workspace = true
 cap-archive.workspace = true
-cap-crypto.workspace = true
 cap-crud.workspace = true
 
 # IC SDK

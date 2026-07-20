@@ -84,7 +84,7 @@ export async function mountVerifyPage(container, {
     sectionEl('Running code', [loadingNote()]),
   ]);
 
-  // 2. Fetch hash live (certificato, agent anonimo). Tollerante: degrada a "n/d".
+  // 2. Fetch hash live (certificato, agent anonimo). Tollerante: degrada a "n/a".
   let liveHash = null;
   let fetchError = null;
   try {
@@ -124,7 +124,7 @@ function buildSections({
       el('p', { class: 'settings-note small muted' },
         fetchError
           ? `Could not read the module hash right now (${fetchError}).`
-          : 'Module hash not available (n/d) — the canister may not have code installed yet.'),
+          : 'Module hash not available (n/a) — the canister may not have code installed yet.'),
     );
   }
 

@@ -55,16 +55,6 @@ type CrudRecord = record {
   created_at : nat64;
   namespace : text;
 };
-// Contesto di derivazione — determina l'input per VetKeys.
-type DerivationContext = variant {
-  // Chiave condivisa per conversazione con un peer.
-  // Ordine canonico: min(owner, peer) + max(owner, peer) → stessa chiave per entrambi.
-  PeerConversation : record { peer : principal };
-  // Chiave per dato archiviato (equivalente al file_id del vault).
-  StoredData : record { data_id : text };
-  // Contesto libero per capability future.
-  Custom : record { context : blob };
-};
 // Record restituito al destinatario.
 type FetchedMessage = record {
   id : nat64;
@@ -92,11 +82,10 @@ type PresenceInfo = record { last_seen_ns : nat64; online : bool };
 type Result = variant { Ok; Err : text };
 type Result_1 = variant { Ok : nat64; Err : text };
 type Result_2 = variant { Ok : CrudRecord; Err : text };
-type Result_3 = variant { Ok : text; Err : text };
-type Result_4 = variant { Ok : PresenceInfo; Err : text };
-type Result_5 = variant { Ok : LeaveMessageResult; Err : text };
-type Result_6 = variant { Ok : principal; Err : text };
-type Result_7 = variant { Ok : Status; Err : text };
+type Result_3 = variant { Ok : PresenceInfo; Err : text };
+type Result_4 = variant { Ok : LeaveMessageResult; Err : text };
+type Result_5 = variant { Ok : principal; Err : text };
+type Result_6 = variant { Ok : Status; Err : text };
 type SignalEntry = record {
   id : nat64;
   to : principal;
@@ -156,7 +145,6 @@ service : (principal, principal) -> {
   delete_archived_message : (principal, nat64) -> (Result);
   delete_own_message : (nat64) -> (Result);
   delete_record : (nat64) -> (Result);
-  derive_encrypted_key : (text, DerivationContext, blob) -> (Result_3);
   edit_own_message : (nat64, blob) -> (Result);
   fetch_my_messages : () -> (vec FetchedMessage) query;
   finalize_assets : () -> (Result);
@@ -166,10 +154,9 @@ service : (principal, principal) -> {
   get_owner : () -> (principal) query;
   get_pending_callers : () -> (vec principal) query;
   get_pending_senders : () -> (vec principal) query;
-  get_presence : () -> (Result_4) query;
+  get_presence : () -> (Result_3) query;
   get_record : (nat64) -> (opt CrudRecord) query;
   get_user_principal : () -> (opt principal) query;
-  get_verification_key : (text) -> (Result_3);
   http_request : (HttpRequest) -> (HttpResponse) query;
   http_request_update : (HttpRequest) -> (HttpResponse);
   is_chat_persistent : (principal) -> (bool) query;
@@ -177,13 +164,13 @@ service : (principal, principal) -> {
   // mutual-contact check); owner/user vedono tutto. Terzi: sempre `false`,
   // così la whitelist non è sondabile dall'esterno (grafo sociale).
   is_whitelisted : (principal) -> (bool) query;
-  leave_message : (principal, blob, nat64) -> (Result_5);
+  leave_message : (principal, blob, nat64) -> (Result_4);
   list_records : (text, nat64, nat64) -> (ListResult) query;
   notify_pending_call : (principal) -> (Result);
   notify_pending_message : (principal) -> (Result);
   pending_ids_for : (principal) -> (vec nat64) query;
   platform_add_controller : (principal) -> (Result);
-  platform_claim : (blob) -> (Result_6);
+  platform_claim : (blob) -> (Result_5);
   platform_cycles : () -> (nat) query;
   platform_eject : (bool) -> (Result);
   platform_get_admin : () -> (opt principal) query;
@@ -197,7 +184,7 @@ service : (principal, principal) -> {
   platform_set_private_ops : (bool) -> (Result);
   platform_set_status_viewers : (vec principal) -> (Result);
   platform_set_tier : (nat8, opt nat64) -> (Result);
-  platform_status : () -> (Result_7);
+  platform_status : () -> (Result_6);
   post_signal : (principal, WebRtcSignalType, text) -> (Result);
   remove_from_whitelist : (principal) -> (Result);
   set_chat_persistent : (principal, bool) -> (Result);

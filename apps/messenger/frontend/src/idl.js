@@ -12,7 +12,6 @@ import { platformMethods } from '@shared/core/platform-idl.js';
 
 const Result = IDL.Variant({ Ok: IDL.Null, Err: IDL.Text });
 const ResultU64 = IDL.Variant({ Ok: IDL.Nat64, Err: IDL.Text });
-const ResultText = IDL.Variant({ Ok: IDL.Text, Err: IDL.Text });
 
 const PresenceInfo = IDL.Record({ online: IDL.Bool, last_seen_ns: IDL.Nat64 });
 const ResultPresence = IDL.Variant({ Ok: PresenceInfo, Err: IDL.Text });
@@ -77,12 +76,6 @@ const UpdateInput = IDL.Record({
 const ListResult = IDL.Record({
   records: IDL.Vec(CrudRecord),
   total: IDL.Nat64,
-});
-
-const DerivationContext = IDL.Variant({
-  PeerConversation: IDL.Record({ peer: IDL.Principal }),
-  StoredData: IDL.Record({ data_id: IDL.Text }),
-  Custom: IDL.Record({ context: IDL.Vec(IDL.Nat8) }),
 });
 
 const HttpRequest = IDL.Record({
@@ -155,10 +148,6 @@ export const idlFactory = () => IDL.Service({
   update_record: IDL.Func([IDL.Nat64, UpdateInput], [ResultCrudRecord], []),
   delete_record: IDL.Func([IDL.Nat64], [Result], []),
   count_records: IDL.Func([IDL.Text], [IDL.Nat64], ['query']),
-
-  // Crypto
-  get_verification_key: IDL.Func([IDL.Text], [ResultText], []),
-  derive_encrypted_key: IDL.Func([IDL.Text, DerivationContext, IDL.Vec(IDL.Nat8)], [ResultText], []),
 
   // Platform (cap-platform — frammento IDL condiviso, attivo se provisionato dal factory)
   ...platformMethods(),

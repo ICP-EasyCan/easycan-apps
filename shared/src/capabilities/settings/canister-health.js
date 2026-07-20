@@ -6,7 +6,7 @@
  *  - platform_cycles : query  → Nat (cicli)
  *  - platform_status : update → variant { Ok: { memory_size: opt nat; … }; Err }
  *
- * Ogni lettura degrada a `null` (mai crash): un'app senza quegli endpoint mostra "n/d".
+ * Ogni lettura degrada a `null` (mai crash): un'app senza quegli endpoint mostra "n/a".
  */
 
 import { call, query } from '../../core/icp.js';
@@ -28,39 +28,39 @@ export async function loadCanisterHealth(canisterId) {
   return out;
 }
 
-/** Cicli → "1,234,567" (locale), o "n/d". */
+/** Cicli → "1,234,567" (locale), o "n/a". */
 export function formatCycles(n) {
-  if (n == null) return 'n/d';
+  if (n == null) return 'n/a';
   try { return Number(n).toLocaleString(); } catch { return String(n); }
 }
 
-/** Byte → "12.3 MB" / "456 KB" / "789 B", o "n/d". */
+/** Byte → "12.3 MB" / "456 KB" / "789 B", o "n/a". */
 export function formatBytes(n) {
-  if (n == null) return 'n/d';
+  if (n == null) return 'n/a';
   const b = Number(n);
   if (b < 1024) return `${b} B`;
   if (b < 1024 * 1024) return `${(b / 1024).toFixed(1)} KB`;
   return `${(b / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-/** Cycles/giorno → "1.76 B/giorno" / "345 M/giorno", o "n/d". */
+/** Cycles/day → "1.76 B/day" / "345 M/day", o "n/a". */
 export function formatBurnPerDay(n) {
-  if (n == null) return 'n/d';
+  if (n == null) return 'n/a';
   const c = Number(n);
-  if (c >= 1e9) return `${(c / 1e9).toFixed(2)} B/giorno`;
-  if (c >= 1e6) return `${(c / 1e6).toFixed(0)} M/giorno`;
-  return `${c.toLocaleString()}/giorno`;
+  if (c >= 1e9) return `${(c / 1e9).toFixed(2)} B/day`;
+  if (c >= 1e6) return `${(c / 1e6).toFixed(0)} M/day`;
+  return `${c.toLocaleString()}/day`;
 }
 
 /**
- * Giorni di autonomia IN IDLE = saldo / burn-idle-al-giorno, o "n/d".
+ * Giorni di autonomia IN IDLE = saldo / burn-idle-al-giorno, o "n/a".
  * ⚠️ Stima ottimistica: `idleBurnPerDay` è il burn di sistema (storage/memoria),
  * ESCLUDE esecuzione e attività → è un tetto massimo, non il drenaggio reale in uso.
  */
 export function formatAutonomyDays(cycles, idleBurnPerDay) {
-  if (cycles == null || idleBurnPerDay == null || idleBurnPerDay === 0n) return 'n/d';
+  if (cycles == null || idleBurnPerDay == null || idleBurnPerDay === 0n) return 'n/a';
   const days = Number(cycles) / Number(idleBurnPerDay);
-  if (!isFinite(days)) return 'n/d';
-  if (days >= 1000) return `~${Math.round(days / 100) * 100} giorni`;
-  return `~${Math.round(days)} giorni`;
+  if (!isFinite(days)) return 'n/a';
+  if (days >= 1000) return `~${Math.round(days / 100) * 100} days`;
+  return `~${Math.round(days)} days`;
 }

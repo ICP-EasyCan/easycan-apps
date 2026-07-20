@@ -1,7 +1,7 @@
 /**
  * contacts-store.js — Rubrica contatti: cache in memoria (sincrona) +
- * localStorage (fallback/bootstrap) + canister cifrato (fonte di verità,
- * cap-crud namespace "contacts") come da piano F2.
+ * localStorage (fallback/bootstrap) + canister (fonte di verità,
+ * cap-crud namespace "contacts").
  *
  * Le API pubbliche restano TUTTE sincrone (stessa firma di prima): sono
  * consumate da 5 call-site (chat.js, add-contact.js, contacts.js, chats.js,
@@ -12,33 +12,33 @@
  * updateContactAlias) — scrivere la lista per intero bypasserebbe la
  * propagazione al canister.
  *
- * Le cancellazioni fallite (canister irraggiungibile, id remoto non ancora
- * noto) lasciano una tombstone locale (`sm_contacts_tombstones`): alla
- * prossima idratazione il record remoto corrispondente viene cancellato
- * invece di essere ri-fuso in locale — senza, un contatto rimosso
- * "risorgerebbe" al riavvio successivo.
+ * Sync multi-device (0.3.4): il canister è la fonte di verità e il pull è
+ * ESPLICITO. `pullContactsFromCanister(actor)` fa un pull-replace 1:1 (aggiunge
+ * i nuovi, RIMUOVE quelli non più sul canister, aggiorna gli alias) ed è
+ * cablato al bottone "Aggiorna contatti". Un device già popolato NON assorbe
+ * automaticamente i cambi remoti al boot — solo il bottone. Le mutazioni locali
+ * in volo sono tracciate (`_pending`) e attese prima di ogni pull, così un
+ * add/remove/rename appena lanciato atterra sul canister PRIMA della lettura e
+ * non viene annullato dal pull-replace (guardia race). Niente più tombstone: la
+ * cancellazione si vede per davvero nel pull-replace, il workaround add-only è
+ * morto con 0.3.4.
  *
  * `initContacts(actor)` va chiamata una volta dopo il login (come
- * initSounds/initCallBanner in main.js): scarica la lista dal canister e la
- * fonde con quella locale (unione per canisterId, mai overwrite — gira su ogni
- * dispositivo). Il diff usa il canisterId in chiaro dell'outer, così la chiave
- * VetKeys viene derivata SOLO se c'è almeno un contatto remoto non ancora in
- * locale (lazy): a cold-open senza modifiche = zero derive, zero picco ~10B.
- * Marca l'import one-shot con `sm_contacts_imported_v1`.
+ * initSounds/initCallBanner in main.js): mappa gli id dei record del canister
+ * (per abilitare update/delete mirati), migra via i record v1 cifrati residui e
+ * — solo su device nuovo (cache vuota) — allinea inbound al canister. Marca
+ * l'import one-shot con `sm_contacts_imported_v2`.
  *
- * Formato record su cap-crud (namespace "contacts"): il blob è JSON
- * `{ v:1, canisterId:"<in chiaro>", envelope:"<base64 di encryptString>" }`
- * dove l'envelope cifra `JSON.stringify({ principalId, alias, muted })`.
- * Il canisterId resta in chiaro (merge idempotente, D5) — il dato privato
- * vero è nell'envelope.
+ * Formato record su cap-crud (namespace "contacts"): il blob è JSON in CHIARO
+ * `{ v:2, canisterId, principalId, alias, muted }`. La rubrica NON è più
+ * cifrata (0.3.4): la lista dei propri contatti non è un segreto che vale il
+ * costo/complessità VetKeys, e il canister è già owner-gated. I record v1
+ * (cifrati, versioni ≤0.3.3) sono illeggibili ora → la migrazione in
+ * `initContacts` li cancella e ri-semina la rubrica dalla cache locale.
  */
 
-import { deriveKey, encryptString, decryptString } from '@shared/core/crypto.js';
-
 const STORAGE_KEY = 'sm_contacts';
-const IMPORTED_MARKER_KEY = 'sm_contacts_imported_v1';
-const TOMBSTONES_KEY = 'sm_contacts_tombstones';
-const CTX = 'messenger';
+const IMPORTED_MARKER_KEY = 'sm_contacts_imported_v2';
 const NS = 'contacts';
 const LIST_LIMIT = 1000;
 
@@ -62,41 +62,20 @@ function _persist() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(_cache));
 }
 
-// ─── Tombstones (cancellazioni pendenti verso il canister) ──────────────────
+// ─── Guardia race: mutazioni locali in volo ─────────────────────────────────
+// Ogni scrittura verso il canister (create/update/delete) viene registrata qui
+// finché non si risolve. `pullContactsFromCanister` le attende prima di leggere,
+// così un add/remove appena lanciato non viene annullato da un pull-replace
+// immediato (la mutazione atterra sul canister PRIMA della lettura).
 
-function _readTombstones() {
-  try {
-    return JSON.parse(localStorage.getItem(TOMBSTONES_KEY) || '[]');
-  } catch { return []; }
-}
+const _pending = new Set();
 
-function _writeTombstones(list) {
-  if (list.length) localStorage.setItem(TOMBSTONES_KEY, JSON.stringify(list));
-  else localStorage.removeItem(TOMBSTONES_KEY);
-}
-
-function _addTombstone(canisterId) {
-  const t = _readTombstones();
-  if (!t.includes(canisterId)) { t.push(canisterId); _writeTombstones(t); }
-}
-
-function _removeTombstone(canisterId) {
-  _writeTombstones(_readTombstones().filter(c => c !== canisterId));
-}
-
-// ─── Base64 (per l'envelope binario dentro il blob JSON) ────────────────────
-
-function toB64(bytes) {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
-  return btoa(s);
-}
-
-function fromB64(b64) {
-  const s = atob(b64);
-  const out = new Uint8Array(s.length);
-  for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
-  return out;
+/** Registra una mutazione in volo; si auto-rimuove quando si risolve. */
+function _track(promise) {
+  _pending.add(promise);
+  const done = () => _pending.delete(promise);
+  promise.then(done, done); // consuma anche il reject: nessun unhandled rejection qui
+  return promise;
 }
 
 // ─── API sincrone (firme invariate) ──────────────────────────────────────────
@@ -111,8 +90,7 @@ export function addContact(canisterId, principalId, alias = '') {
   const contact = { canisterId, principalId, alias, muted: false };
   contacts.push(contact);
   _persist();
-  _removeTombstone(canisterId); // ri-aggiunto dopo una rimozione: la delete pendente non deve più applicarsi
-  _createOnCanister(contact).catch(e => console.warn('[contacts] create failed:', e.message));
+  _track(_createOnCanister(contact)).catch(e => console.warn('[contacts] create failed:', e.message));
   return true;
 }
 
@@ -120,13 +98,10 @@ export function removeContact(canisterId) {
   const contacts = _ensureCache().filter(c => c.canisterId !== canisterId);
   _cache = contacts;
   _persist();
-  _addTombstone(canisterId);
   const id = _idByCanister.get(canisterId);
   if (id !== undefined) {
     _idByCanister.delete(canisterId);
-    _deleteOnCanister(id)
-      .then(() => _removeTombstone(canisterId))
-      .catch(e => console.warn('[contacts] delete failed:', e.message));
+    _track(_deleteOnCanister(id)).catch(e => console.warn('[contacts] delete failed:', e.message));
   }
 }
 
@@ -141,62 +116,40 @@ export function updateContactAlias(canisterId, alias) {
   if (!c) return;
   c.alias = alias;
   _persist();
-  _upsertOnCanister(c).catch(e => console.warn('[contacts] update failed:', e.message));
+  _track(_upsertOnCanister(c)).catch(e => console.warn('[contacts] update failed:', e.message));
 }
 
-// ─── Canister: chiave + codifica record ──────────────────────────────────────
+// ─── Canister: codifica record (JSON in chiaro, v2) ──────────────────────────
 
 let _actor = null;
-let _keyPromise = null;
 
-function _keyFor(actor) {
-  if (!_keyPromise) _keyPromise = deriveKey(actor, CTX, { type: 'stored', dataId: NS });
-  return _keyPromise;
-}
-
-async function _encodeRecord(actor, contact) {
-  const key = await _keyFor(actor);
-  const inner = JSON.stringify({
+/** Serializza un contatto nel blob v2 in chiaro salvato su cap-crud. */
+function _encodeRecord(contact) {
+  const outer = {
+    v: 2,
+    canisterId: contact.canisterId,
     principalId: contact.principalId,
     alias: contact.alias || '',
     muted: !!contact.muted,
-  });
-  const envelope = await encryptString(inner, key);
-  const outer = { v: 1, canisterId: contact.canisterId, envelope: toB64(envelope) };
+  };
   return new TextEncoder().encode(JSON.stringify(outer));
 }
 
-/**
- * Parse del SOLO blob esterno (JSON in chiaro `{ v, canisterId, envelope }`) —
- * nessuna derivazione VetKey, nessun decrypt. Serve al flusso lazy di
- * initContacts per conoscere canisterId + id cap-crud di ogni record senza
- * pagare la derive (~10B) a ogni login.
- */
+/** Parsa il blob JSON di un record cap-crud. Ritorna l'oggetto grezzo (con `v`). */
 function _decodeOuter(bytes) {
-  const outer = JSON.parse(new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)));
-  return { canisterId: outer.canisterId, envelope: outer.envelope };
+  return JSON.parse(new TextDecoder().decode(bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes)));
 }
 
-/**
- * Decifra l'envelope di un outer già parsato (deriva la chiave — costo VetKey).
- * Da chiamare SOLO quando il record serve davvero (contatto mancante in locale).
- */
-async function _decryptEnvelope(actor, outer) {
-  const key = await _keyFor(actor);
-  const inner = JSON.parse(await decryptString(fromB64(outer.envelope), key));
-  return {
-    canisterId: outer.canisterId,
-    principalId: inner.principalId,
-    alias: inner.alias || '',
-    muted: !!inner.muted,
-  };
+/** true se l'outer è un record contatto v2 valido (in chiaro). */
+function _isValidV2(outer) {
+  return outer && outer.v === 2 && !!outer.principalId && !!outer.canisterId;
 }
 
 // ─── Canister: scritture (best-effort, non bloccanti) ────────────────────────
 
 async function _createOnCanister(contact) {
   if (!_actor) return;
-  const data = await _encodeRecord(_actor, contact);
+  const data = _encodeRecord(contact);
   const result = await _actor.create_record({ namespace: NS, data });
   if (result.Err !== undefined) throw new Error(result.Err);
   _idByCanister.set(contact.canisterId, result.Ok.id);
@@ -206,7 +159,7 @@ async function _upsertOnCanister(contact) {
   if (!_actor) return;
   const id = _idByCanister.get(contact.canisterId);
   if (id === undefined) { await _createOnCanister(contact); return; }
-  const data = await _encodeRecord(_actor, contact);
+  const data = _encodeRecord(contact);
   const result = await _actor.update_record(id, { data });
   if (result.Err !== undefined) throw new Error(result.Err);
 }
@@ -217,33 +170,36 @@ async function _deleteOnCanister(id) {
   if (result.Err !== undefined) throw new Error(result.Err);
 }
 
-// ─── Hydration + import one-shot (D5) ────────────────────────────────────────
+// ─── Hydration + migrazione v1→v2 + import one-shot ──────────────────────────
 
-/** Invalida actor + chiave derivata. Da chiamare al logout (identità cambia). */
+/** Invalida l'actor. Da chiamare al logout (identità cambia). */
 export function resetContactsSession() {
   _actor = null;
-  _keyPromise = null;
 }
 
 /**
- * Da chiamare una volta dopo il login (actor col canister proprio già wired
- * su cap-crud + cap-crypto). Idrata la cache dal canister in modo lazy (deriva
- * la chiave solo per i record mancanti in locale) e, al primo avvio su QUESTO
- * dispositivo, fonde i contatti locali pre-esistenti verso il canister
- * (unione per canisterId, mai overwrite).
+ * Da chiamare una volta dopo il login (actor col canister proprio già wired su
+ * cap-crud). Al boot fa UNA lettura del canister (query gratis) per:
+ *  - mappare canisterId→id di tutti i record v2 vivi (abilita update/delete
+ *    mirati per le mutazioni di questa sessione — senza, una remove non saprebbe
+ *    quale record cancellare);
+ *  - migrare via i record v1 cifrati residui (illeggibili ora: li cancella).
+ * NON assorbe inbound i cambi remoti su un device già popolato: quello è compito
+ * del bottone "Aggiorna contatti" (pullContactsFromCanister). Solo su device
+ * nuovo (cache locale vuota) allinea inbound al canister una volta.
+ * Al primo avvio 0.3.4 (marker `_v2`) ri-semina outbound i contatti locali che
+ * il canister non ha ancora (nati prima della rubrica-in-chiaro).
  * @param {object} actor
  */
 export async function initContacts(actor) {
   _actor = actor;
   const contacts = _ensureCache();
+  const firstRun = !localStorage.getItem(IMPORTED_MARKER_KEY);
 
-  const tombstones = _readTombstones();
-  // Record remoti da decifrare: SOLO quelli non già in cache locale. Il diff
-  // si fa sul canisterId in chiaro (outer), quindi a cold-open senza modifiche
-  // resta vuoto → zero derive VetKey → nessun picco ~10B (piano A1, lazy).
-  const missing = []; // { rec, outer }
+  // Lettura unica al boot: mappa gli id + ripulisce i record v1 cifrati.
   try {
     const result = await actor.list_records(NS, 0n, BigInt(LIST_LIMIT));
+    _idByCanister.clear();
     for (const rec of result.records) {
       let outer;
       try {
@@ -252,51 +208,30 @@ export async function initContacts(actor) {
         console.warn(`[contacts] outer parse failed for record ${rec.id}:`, e.message);
         continue;
       }
-      const canisterId = outer.canisterId;
-      if (!canisterId) continue; // formato inatteso: salta senza derivare
-      if (tombstones.includes(canisterId)) {
-        // Rimosso su questo dispositivo con delete remota fallita: applica ora (no decrypt).
-        try {
-          await _deleteOnCanister(rec.id);
-          _removeTombstone(canisterId);
-        } catch (e) {
-          console.warn(`[contacts] tombstone delete failed for ${canisterId}:`, e.message);
-        }
+      if (!_isValidV2(outer)) {
+        // Record v1 cifrato o malformato: illeggibile ora che la decifratura è
+        // rimossa → cancellalo (best-effort). La rubrica si ri-semina dalla
+        // cache locale via l'import one-shot sotto.
+        try { await _deleteOnCanister(rec.id); }
+        catch (e) { console.warn(`[contacts] v1 cleanup failed for record ${rec.id}:`, e.message); }
         continue;
       }
-      // Mappa id per TUTTI i record vivi (abilita update/delete futuri senza derivare).
-      _idByCanister.set(canisterId, rec.id);
-      // Decifra solo i contatti non ancora presenti in locale.
-      if (!contacts.some(c => c.canisterId === canisterId)) {
-        missing.push({ rec, outer });
-      }
+      // Mappa id per TUTTI i record v2 vivi (abilita update/delete futuri).
+      // NIENTE merge inbound qui: un device popolato non assorbe i cambi remoti
+      // automaticamente — solo il bottone (pull esplicito).
+      _idByCanister.set(outer.canisterId, rec.id);
     }
   } catch (e) {
     console.warn('[contacts] hydration failed:', e.message);
     return;
   }
 
-  // Deriva la chiave UNA volta e decifra SOLO i mancanti (se `missing` è vuoto,
-  // nessuna derive). Unione: aggiunge solo i mancanti, mai overwrite.
-  let changed = false;
-  for (const { rec, outer } of missing) {
-    try {
-      const decoded = await _decryptEnvelope(actor, outer);
-      if (!contacts.some(c => c.canisterId === decoded.canisterId)) {
-        contacts.push(decoded);
-        changed = true;
-      }
-    } catch (e) {
-      console.warn(`[contacts] decrypt failed for record ${rec.id}:`, e.message);
-    }
-  }
-  if (changed) _persist();
-
   // Import one-shot: spinge verso il canister i contatti locali pre-esistenti
-  // (nati prima di F2, mai visti dal canister). Idempotente, gira su ogni
-  // dispositivo — il marcatore si scrive solo se TUTTI gli import riescono,
-  // così un fallimento parziale viene ritentato al prossimo avvio.
-  if (!localStorage.getItem(IMPORTED_MARKER_KEY)) {
+  // (nati prima di 0.3.4 o rimasti solo in cache dopo la migrazione v1→v2, mai
+  // visti dal canister in v2). Idempotente, gira su ogni dispositivo — il
+  // marcatore si scrive solo se TUTTI gli import riescono, così un fallimento
+  // parziale viene ritentato al prossimo avvio.
+  if (firstRun) {
     let allOk = true;
     for (const c of contacts) {
       if (!_idByCanister.has(c.canisterId)) {
@@ -309,4 +244,77 @@ export async function initContacts(actor) {
     }
     if (allOk) localStorage.setItem(IMPORTED_MARKER_KEY, '1');
   }
+
+  // Device nuovo (cache locale vuota): allinea inbound al canister una volta.
+  // Un device già popolato resta com'è finché non si preme "Aggiorna contatti".
+  if (contacts.length === 0) {
+    try { await pullContactsFromCanister(actor); }
+    catch (e) { console.warn('[contacts] initial pull failed:', e.message); }
+  }
+}
+
+// ─── Sync esplicito: pull-replace 1:1 dal canister ───────────────────────────
+
+/**
+ * Sync esplicito ("Aggiorna contatti"): allinea la cache locale allo stato del
+ * canister (pull-replace 1:1). Aggiunge i contatti presenti sul canister e non
+ * in locale, RIMUOVE quelli non più sul canister, aggiorna gli alias cambiati.
+ * Attende prima le mutazioni locali in volo (guardia race) così un add/remove/
+ * rename appena lanciato atterra sul canister PRIMA della lettura e non viene
+ * annullato dal pull. Ritorna `{ added, removed, updated }`.
+ * @param {object} [actor] default: l'actor già wired da initContacts
+ */
+export async function pullContactsFromCanister(actor) {
+  const a = actor || _actor;
+  if (!a) return { added: 0, removed: 0, updated: 0 };
+
+  // Guardia race: le mutazioni locali non ancora propagate devono atterrare sul
+  // canister prima di leggerlo, altrimenti il pull-replace le vedrebbe assenti.
+  if (_pending.size) await Promise.allSettled([..._pending]);
+
+  const result = await a.list_records(NS, 0n, BigInt(LIST_LIMIT));
+
+  // Stato canister: solo record v2 validi. Rimappa gli id (fonte di verità).
+  const remote = new Map(); // canisterId -> outer
+  _idByCanister.clear();
+  for (const rec of result.records) {
+    let outer;
+    try { outer = _decodeOuter(rec.data); }
+    catch { continue; }
+    if (!_isValidV2(outer)) continue; // salta v1/malformati (li ripulisce initContacts)
+    _idByCanister.set(outer.canisterId, rec.id);
+    remote.set(outer.canisterId, outer);
+  }
+
+  const contacts = _ensureCache();
+  let added = 0, removed = 0, updated = 0;
+  const next = [];
+
+  // Tieni i locali ancora presenti sul canister; scarta gli altri (cancellati).
+  for (const c of contacts) {
+    if (remote.has(c.canisterId)) next.push(c);
+    else removed++;
+  }
+  // Aggiorna alias dei presenti + aggiungi i nuovi arrivati dal canister.
+  for (const [canisterId, outer] of remote) {
+    const existing = next.find(c => c.canisterId === canisterId);
+    if (existing) {
+      if ((existing.alias || '') !== (outer.alias || '')) {
+        existing.alias = outer.alias || '';
+        updated++;
+      }
+    } else {
+      next.push({
+        canisterId,
+        principalId: outer.principalId,
+        alias: outer.alias || '',
+        muted: !!outer.muted,
+      });
+      added++;
+    }
+  }
+
+  _cache = next;
+  _persist();
+  return { added, removed, updated };
 }

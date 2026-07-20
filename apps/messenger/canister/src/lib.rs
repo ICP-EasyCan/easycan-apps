@@ -12,7 +12,6 @@ use std::time::Duration;
 // Re-export tipi Candid per export_candid!()
 use cap_archive::{ArchiveInput, ArchivedMessage};
 use cap_crud::{CreateInput, CrudRecord, ListResult, UpdateInput};
-use cap_crypto::DerivationContext;
 use cap_messaging::{FetchedMessage, LeaveMessageResult};
 use cap_presence::PresenceInfo;
 use cap_signaling::{SignalEntry, WebRtcSignalType};
@@ -429,24 +428,6 @@ fn delete_record(id: u64) -> Result<(), String> {
 fn count_records(namespace: String) -> u64 {
     if core_auth::require_owner_or_user(caller()).is_err() { return 0; }
     cap_crud::count_records(&namespace)
-}
-
-// ─── cap-crypto ─────────────────────────────────────────────────────────────
-
-#[ic_cdk::update]
-async fn get_verification_key(context_name: String) -> Result<String, String> {
-    cap_crypto::get_verification_key(context_name).await
-}
-
-#[ic_cdk::update]
-async fn derive_encrypted_key(
-    context_name: String,
-    derivation_ctx: DerivationContext,
-    transport_public_key: Vec<u8>,
-) -> Result<String, String> {
-    core_auth::require_owner_or_user(caller())?;
-    let owner = core_auth::user_principal().unwrap_or_else(core_auth::owner);
-    cap_crypto::derive_encrypted_key(context_name, derivation_ctx, transport_public_key, owner).await
 }
 
 // ─── cap-platform (solo con feature "platform") ─────────────────────────────

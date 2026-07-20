@@ -469,6 +469,11 @@
 
 .contacts-add-cta { padding: 0.5rem 0.9rem; font-size: 0.9rem; }
 
+.contacts-refresh-cta { font-size: 1.15rem; line-height: 1; padding: 0.35rem 0.5rem; }
+.contacts-refresh-cta.is-spinning { animation: contacts-refresh-spin 0.8s linear infinite; }
+.contacts-refresh-cta:disabled { opacity: 0.6; cursor: default; }
+@keyframes contacts-refresh-spin { to { transform: rotate(360deg); } }
+
 .dup-prompt {
   display: flex; flex-direction: column; gap: 0.5rem;
   padding: 0.75rem; margin-top: 0.5rem;

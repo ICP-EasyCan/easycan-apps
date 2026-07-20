@@ -80,6 +80,9 @@ export function updateLinkSection(targetRoute = '#update') {
  *   backRoute?: string,
  *   enableInstall?: boolean, // Fase 2: abilita l'install in-app (default false → "coming soon")
  *   e2ee?: boolean,          // Fase 3: app E2EE (vault) → mostra il caveat sul rollback
+ *   takeSnapshot?: boolean,  // default true: snapshot pre-upgrade (comportamento di oggi). false → l'app
+ *                            //   salta lo snapshot e la UI non promette/offre il rollback. Leva per-app (main.js
+ *                            //   UPGRADE); vault/EasyHub non lo passano → default true = identico a oggi.
  * }} opts
  */
 export async function mountUpdatePage(container, {
@@ -91,6 +94,7 @@ export async function mountUpdatePage(container, {
   backRoute = '#settings',
   enableInstall = false,
   e2ee = false,
+  takeSnapshot = true,
 }) {
   // 1. Skeleton immediato.
   renderPage(container, backRoute, [
@@ -111,7 +115,7 @@ export async function mountUpdatePage(container, {
 
   // 3. Render.
   renderPage(container, backRoute, buildSections({
-    canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee, backupKey,
+    canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee, takeSnapshot, backupKey,
   }));
 }
 
@@ -214,7 +218,7 @@ async function fetchManifest(url) {
 
 // ─── Costruzione sezioni ──────────────────────────────────────────────────────
 
-function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee, backupKey }) {
+function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enableInstall, e2ee, takeSnapshot, backupKey }) {
   const sections = [];
   const latest = manifest?.data || null;
 
@@ -233,7 +237,7 @@ function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enabl
   // — Sezione: ultima release pubblicata —
   if (latest) {
     const latestRows = [
-      keyVal('Latest version', latest.version ? `v${latest.version}` : 'n/d'),
+      keyVal('Latest version', latest.version ? `v${latest.version}` : 'n/a'),
     ];
     if (latest.released_at) latestRows.push(keyVal('Released', latest.released_at));
     if (latest.min_compatible_version) {
@@ -268,7 +272,7 @@ function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enabl
   }
 
   // — Sezione: installazione —
-  sections.push(installSection({ canisterId, current, latest, enableInstall, e2ee, backupKey }));
+  sections.push(installSection({ canisterId, current, latest, enableInstall, e2ee, takeSnapshot, backupKey }));
 
   // — Sezione: ripristino versione precedente (standalone, indipendente dall'install) —
   const restore = restoreSection({ canisterId, enableInstall, e2ee });
@@ -282,7 +286,7 @@ function buildSections({ canisterId, current, liveHash, manifest, repoUrl, enabl
  * e un update disponibile → bottone che esegue il flusso a 6 passi (flow.js) con log di
  * progresso; al fallimento offre il rollback manuale allo snapshot pre-upgrade.
  */
-function installSection({ canisterId, current, latest, enableInstall, e2ee, backupKey }) {
+function installSection({ canisterId, current, latest, enableInstall, e2ee, takeSnapshot = true, backupKey }) {
   if (!enableInstall) {
     return sectionEl('Install', [
       el('p', { class: 'settings-note small muted' },
@@ -314,8 +318,11 @@ function installSection({ canisterId, current, latest, enableInstall, e2ee, back
 
   async function doInstall() {
     const ok = window.confirm(
-      'The app will go offline for a few seconds while it restarts. A safety snapshot ' +
-      'is taken first so you can roll back.\n\n' +
+      (takeSnapshot
+        ? 'The app will go offline for a few seconds while it restarts. A safety snapshot ' +
+          'is taken first so you can roll back.\n\n'
+        : 'The app will go offline for a few seconds while it restarts. No pre-upgrade ' +
+          'snapshot is taken for this app, so a failed update cannot be rolled back.\n\n') +
       'IMPORTANT: keep this tab open and stay connected until the update finishes. ' +
       'If the tab closes or the network drops mid-update, the app can be left stopped ' +
       'and temporarily unreachable.\n\nContinue?');
@@ -323,7 +330,7 @@ function installSection({ canisterId, current, latest, enableInstall, e2ee, back
     log.replaceChildren();
     setActions(el('button', { class: 'btn-secondary', disabled: true }, 'Updating…'));
     append(`Starting update v${current} → v${latest.version}…`);
-    const res = await runUpgrade({ canisterId, manifest: latest, onProgress });
+    const res = await runUpgrade({ canisterId, manifest: latest, takeSnapshot, onProgress });
     if (res.ok) {
       append('✓ Update complete. Reload the app to start the new version.');
       setActions(el('button', { class: 'btn-primary', onclick: () => location.reload() }, 'Reload now'));
@@ -362,14 +369,23 @@ function installSection({ canisterId, current, latest, enableInstall, e2ee, back
   const intro = [];
   if (canInstall) {
     intro.push(el('p', { class: 'settings-note small muted' },
-      'Install the new version directly from here. The code is fetched from the release, ' +
-      'its hash is verified, and a snapshot is taken before anything changes — so a failed ' +
-      'upgrade can be rolled back. The app is offline only for the few seconds it restarts.'));
-    intro.push(
-      el('label', { class: 'settings-row update-autorollback' },
-        autoRollbackToggle,
-        el('span', { class: 'settings-note small muted' },
-          'Roll back automatically if the update fails its health check')));
+      takeSnapshot
+        ? 'Install the new version directly from here. The code is fetched from the release, ' +
+          'its hash is verified, and a snapshot is taken before anything changes — so a failed ' +
+          'upgrade can be rolled back. The app is offline only for the few seconds it restarts.'
+        : 'Install the new version directly from here. The code is fetched from the release and ' +
+          'its hash is verified before anything changes. No pre-upgrade snapshot is taken for ' +
+          'this app, so a failed update cannot be rolled back. The app is offline only for the ' +
+          'few seconds it restarts.'));
+    // Auto-rollback ha senso solo se c'è uno snapshot a cui tornare: senza (takeSnapshot:false)
+    // il toggle sarebbe fuorviante → lo nascondiamo (l'esito su fallimento è solo Retry).
+    if (takeSnapshot) {
+      intro.push(
+        el('label', { class: 'settings-row update-autorollback' },
+          autoRollbackToggle,
+          el('span', { class: 'settings-note small muted' },
+            'Roll back automatically if the update fails its health check')));
+    }
     if (e2ee) intro.push(e2eeCaveatNote());
 
     const installBtn = el('button', {
@@ -658,7 +674,7 @@ function fmtSize(bytes) {
   try {
     return `${(Number(BigInt(bytes)) / 1_048_576).toFixed(1)} MB`;
   } catch {
-    return 'n/d';
+    return 'n/a';
   }
 }
 

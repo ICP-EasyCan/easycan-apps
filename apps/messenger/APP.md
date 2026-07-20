@@ -38,7 +38,6 @@ Tutti i blocchi della fabbrica:
 | cap-signaling | Signal board WebRTC |
 | cap-notify | Pending senders + callers |
 | cap-archive | Cronologia persistente + persist flags |
-| cap-crypto | VetKeys E2EE (stub per ora) |
 
 ## Blocchi frontend richiesti
 

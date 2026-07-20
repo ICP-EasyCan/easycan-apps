@@ -7,7 +7,7 @@
 
 import { el, render, truncate, formatLastSeen }
                            from '@shared/ui/dom.js';
-import { loadContacts, removeContact, updateContactAlias }
+import { loadContacts, removeContact, updateContactAlias, pullContactsFromCanister }
                            from '../contacts-store.js';
 import { avatarEl }        from '../components/avatar.js';
 import { checkPeerPresence } from '../connection-manager.js';
@@ -33,11 +33,32 @@ function _render(container) {
     onclick: () => navigate('#add-contact'),
   }, '+  Add contact');
 
+  // Sync esplicito: pull-replace 1:1 dal canister (add/remove/rename multi-device).
+  const refreshBtn = el('button', {
+    class: 'btn-icon contacts-refresh-cta',
+    title: 'Update contacts from canister',
+    onclick: async (e) => {
+      const btn = e.currentTarget;
+      if (btn.disabled) return;
+      btn.disabled = true;
+      btn.classList.add('is-spinning');
+      try {
+        await pullContactsFromCanister();
+        _render(container); // ridisegna con la lista allineata
+      } catch (err) {
+        console.warn('[contacts] refresh failed:', err.message);
+        btn.disabled = false;
+        btn.classList.remove('is-spinning');
+        btn.title = 'Update failed — retry';
+      }
+    },
+  }, '↻');
+
   render(container,
     el('div', { class: 'page page-contacts' },
       el('header', { class: 'topbar' },
         el('span', { class: 'topbar-title' }, 'Contacts'),
-        addBtn,
+        el('div', { class: 'topbar-actions' }, refreshBtn, addBtn),
       ),
       el('div', { class: 'contacts-list' }, ...items),
     ),

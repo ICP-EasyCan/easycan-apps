@@ -74,10 +74,10 @@ export function renderSettings(container, options = {}) {
         el('h3', {}, 'Canister'),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Cycles'), cyclesVal),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Memory'), memVal),
-        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Consumo idle'), burnVal),
-        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Autonomia (idle)'), autonomyVal),
+        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Idle burn'), burnVal),
+        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Autonomy (idle)'), autonomyVal),
         el('p', { class: 'settings-hint small' },
-          'Stima in idle: esclude l’uso attivo (chiamate, messaggi). È il massimo teorico, non il consumo reale.'),
+          'Idle estimate: excludes active use (calls, messages). It’s the theoretical maximum, not real consumption.'),
       ),
     );
   }
@@ -119,8 +119,8 @@ export function renderSettings(container, options = {}) {
         autonomyVal.textContent = formatAutonomyDays(cycles, idleBurnPerDay);
       })
       .catch(() => {
-        cyclesVal.textContent = 'n/d'; memVal.textContent = 'n/d';
-        burnVal.textContent = 'n/d'; autonomyVal.textContent = 'n/d';
+        cyclesVal.textContent = 'n/a'; memVal.textContent = 'n/a';
+        burnVal.textContent = 'n/a'; autonomyVal.textContent = 'n/a';
       });
   }
 }

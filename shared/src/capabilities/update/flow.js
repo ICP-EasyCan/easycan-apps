@@ -24,7 +24,7 @@
 
 import {
   clearChunkStore, uploadChunk, stopCanister, startCanister,
-  takeSnapshot, loadSnapshot, installChunkedCode, hexToBytes, sliceChunks,
+  takeSnapshot as takeCanisterSnapshot, loadSnapshot, installChunkedCode, hexToBytes, sliceChunks,
 } from '../../core/management.js';
 import { call, query } from '../../core/icp.js';
 
@@ -65,6 +65,10 @@ const ASSET_BATCH_BYTES = 1_500_000; // soglia per batch upload_asset_batch (< l
  *   manifest: object,            // contratto release: wasm_url, wasm_sha256, frontend_url, frontend_sha256, version
  *   mode?: 'upgrade'|'reinstall',
  *   onChainSha256?: string|null, // hex SHA-256 on-chain (factory get_wasm_sha256) — anchor anti-manifest-manomesso (Arco B)
+ *   takeSnapshot?: boolean,      // default true: prende lo snapshot pre-upgrade (passo 3). false → salta lo snapshot
+ *                                //   (canister ancora fermato/riavviato); `snapshotId` nel risultato resta null e
+ *                                //   l'auto-rollback della UI si spegne da sé. Leva di config per-app (main.js UPGRADE),
+ *                                //   nessuna UI utente. Vault/EasyHub non lo passano → default true = identico a oggi.
  *   healthPing?: string|null,    // metodo query "vivo" post-install; null = solo app_version (app generica)
  *   onProgress?: (step: string, detail?: string) => void,
  * }} opts
@@ -77,7 +81,7 @@ const ASSET_BATCH_BYTES = 1_500_000; // soglia per batch upload_asset_batch (< l
  */
 export async function runUpgrade({
   canisterId, manifest, mode = 'upgrade', onChainSha256 = null, platformInit = null,
-  healthPing = 'get_user_principal', onProgress = () => {},
+  takeSnapshot = true, healthPing = 'get_user_principal', onProgress = () => {},
 }) {
   let snapshotId = null;
   let stopped = false;
@@ -93,7 +97,7 @@ export async function runUpgrade({
       if (!want || want !== got) {
         throw new Error(
           `Manifest hash does not match the on-chain record — refusing to install ` +
-          `(on-chain ${want || 'n/d'}, manifest ${got || 'n/d'}).`);
+          `(on-chain ${want || 'n/a'}, manifest ${got || 'n/a'}).`);
       }
     }
     // ── Passo 1: WASM verificato ───────────────────────────────────────────────
@@ -112,13 +116,20 @@ export async function runUpgrade({
       chunkHashes.push(await uploadChunk(canisterId, new Uint8Array(chunks[i])));
     }
 
-    // ── Passo 3: stop + snapshot (rete di sicurezza) ────────────────────────────
+    // ── Passo 3: stop + snapshot opzionale (rete di sicurezza) ──────────────────
+    // Con `takeSnapshot:false` (leva per-app) si salta lo snapshot: il canister viene
+    // comunque fermato per l'install e riavviato al passo 4. `snapshotId` resta null →
+    // niente rete di rollback (la UI se ne accorge e non offre auto-rollback).
     phase = 'snapshot';
-    onProgress('snapshot', 'Stopping the app and taking a safety snapshot…');
+    onProgress('snapshot', takeSnapshot
+      ? 'Stopping the app and taking a safety snapshot…'
+      : 'Stopping the app…');
     await stopCanister(canisterId);
     stopped = true;
-    const snap = await takeSnapshot(canisterId);
-    snapshotId = snap.id;
+    if (takeSnapshot) {
+      const snap = await takeCanisterSnapshot(canisterId);
+      snapshotId = snap.id;
+    }
 
     // ── Passo 4: install (mode=upgrade|reinstall) + start ───────────────────────
     phase = 'install';
@@ -165,13 +176,14 @@ export async function runUpgrade({
  *   onChainSha256: string,       // hex SHA-256 da factory.get_wasm_sha256() — anchor anti-manifest-manomesso
  *   spawnerId: string,           // P_spawner — init-arg dell'app B (feature platform)
  *   factoryId: string,           // P_factory — init-arg dell'app B; discrimina provision vs cambio-app sovrano
+ *   takeSnapshot?: boolean,      // default true: snapshot pre-reinstall (cattura l'app uscente per il rollback)
  *   healthPing?: string|null,    // metodo query "vivo" di B (default null: solo app_version)
  *   onProgress?: (step: string, detail?: string) => void,
  * }} opts
  * @returns {Promise<{ ok: boolean, phase: string, snapshotId: Uint8Array|null, error?: string }>}
  */
-export function runReinstall({ canisterId, manifest, onChainSha256, spawnerId, factoryId, healthPing = null, onProgress = () => {} }) {
-  return runUpgrade({ canisterId, manifest, mode: 'reinstall', onChainSha256, platformInit: { spawnerId, factoryId }, healthPing, onProgress });
+export function runReinstall({ canisterId, manifest, onChainSha256, spawnerId, factoryId, takeSnapshot = true, healthPing = null, onProgress = () => {} }) {
+  return runUpgrade({ canisterId, manifest, mode: 'reinstall', onChainSha256, platformInit: { spawnerId, factoryId }, takeSnapshot, healthPing, onProgress });
 }
 
 /**

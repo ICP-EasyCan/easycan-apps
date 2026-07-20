@@ -61,8 +61,8 @@ setDefaultIdlFactory(idlFactory);
 // (vedi scripts/deploy-factory.sh). releaseSha256 = wasm_sha256 del manifest GitHub.
 const VERIFY = {
   repoUrl: 'https://github.com/ICP-EasyCan/easycan-apps',
-  releaseTag: 'messenger-v0.3.3',
-  releaseSha256: '9f239ff1527b97c25db68725c6158c1a91aadfe449f9ad39355461665debea28',
+  releaseTag: 'messenger-v0.3.4',
+  releaseSha256: '363bc38b74f4b5eb7350555fe285c2967fcd6d490d014e1a01cec6bf41aba12f',
   dockerPackage: 'messenger-canister',
   e2eeFrontend: false,      // messenger NON è E2EE
 };
@@ -70,7 +70,10 @@ const VERIFY = {
 // Coordinate self-upgrade. `app` = sottocartella su `dist` (transport raw.githubusercontent).
 // `enableInstall` accende il flusso in-app a 6 passi (Fase 2: fetch+verify → chunk → snapshot
 // → install → frontend → health), con rollback manuale + auto allo snapshot.
-const UPGRADE = { repo: 'ICP-EasyCan/easycan-apps', app: 'messenger', enableInstall: true };
+// `takeSnapshot` (default ON): leva per saltare lo snapshot pre-upgrade su un upgrade di cui
+// si è sicuri — messenger ha comunque dfx come rete di recovery. A false: nessuno snapshot,
+// nessun auto-rollback (solo Retry su fallimento). Nessuna UI utente: è una scelta di config.
+const UPGRADE = { repo: 'ICP-EasyCan/easycan-apps', app: 'messenger', enableInstall: true, takeSnapshot: true };
 
 async function boot() {
   // Cattura dei token dal fragment (#claim= / #install=): sincrona e PRIMA di
