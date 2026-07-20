@@ -8,7 +8,7 @@
 import { CANISTER_ID } from '@shared/core/config.js';
 
 // ─── Capability ────────────────────────────────────────────────────────────
-import { initPresence, stopPresence, checkPeerPresence }
+import { initPresence, stopPresence, checkPeerPresence, watchPeerPresence }
   from '@shared/capabilities/presence/index.js';
 import { startPendingPoll, stopPendingPoll, getPendingCache, removePendingFromCache,
          getPendingCallCache, removePendingCallFromCache }
@@ -33,7 +33,7 @@ export function stopConnectionManager() {
 
 export {
   // presence
-  checkPeerPresence,
+  checkPeerPresence, watchPeerPresence,
   // notify
   getPendingCache, removePendingFromCache,
   getPendingCallCache, removePendingCallFromCache,

@@ -31,6 +31,14 @@ const managementIdl = ({ IDL: I }) => {
     module_hash: I.Opt(I.Vec(I.Nat8)),
     memory_size: I.Nat,
     cycles: I.Nat,
+    // Burn di sistema/giorno (storage+memoria, esclude esecuzione). Serve al pre-flight
+    // snapshot di runUpgrade per stimare la freezing reserve. Opt (non required) di
+    // proposito: questo record è CONDIVISO da tutti i chiamanti di canister_status
+    // (es. listControllers) — un campo non-opt assente farebbe fallire il decode ANCHE
+    // per loro. Con Opt, un ambiente che non lo espone degrada a "sconosciuto" nel solo
+    // preflight (best-effort) senza toccare gli altri. Campi extra della reply
+    // (reserved_cycles, query_stats, memory_metrics) vengono ignorati dal decode Candid.
+    idle_cycles_burned_per_day: I.Opt(I.Nat),
   });
 
   // ── Self-upgrade §B / Fase 2 — chunked install + snapshot ──────────────────
@@ -129,6 +137,27 @@ export async function listControllers(canisterIdText) {
   const mgmt = await getManagement(target);
   const status = await mgmt.canister_status({ canister_id: target });
   return status.settings.controllers;
+}
+
+/**
+ * Legge cicli + parametri di burn/freezing del canister (mgmt `canister_status`;
+ * il caller deve essere controller — vero per l'app-origin identity post-claim).
+ * Usato dal pre-flight snapshot di `runUpgrade` per stimare se c'è margine sufficiente.
+ * @param {string} canisterIdText
+ * @returns {Promise<{ cycles: bigint, memorySize: bigint, freezingThresholdSeconds: bigint, idleBurnPerDay: bigint }>}
+ */
+export async function readCyclesStatus(canisterIdText) {
+  const target = Principal.fromText(canisterIdText);
+  const mgmt = await getManagement(target);
+  const s = await mgmt.canister_status({ canister_id: target });
+  return {
+    cycles: BigInt(s.cycles),
+    memorySize: BigInt(s.memory_size),
+    freezingThresholdSeconds: BigInt(s.settings.freezing_threshold),
+    // idle_cycles_burned_per_day è Opt: assente → 0n (preflight best-effort: la freezing
+    // reserve stimata degrada al solo buffer di esecuzione, non blocca l'upgrade).
+    idleBurnPerDay: s.idle_cycles_burned_per_day.length ? BigInt(s.idle_cycles_burned_per_day[0]) : 0n,
+  };
 }
 
 /**

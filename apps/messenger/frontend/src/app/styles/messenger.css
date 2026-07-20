@@ -174,12 +174,24 @@
 }
 
 .bottom-nav-tab {
+  position: relative;
   flex: 1; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 0.3rem;
   background: transparent; border: none; cursor: pointer;
   padding: 0.75rem 0.5rem;
   color: var(--text-secondary); font-size: 0.75rem; font-weight: 600;
   transition: all 0.2s var(--ease);
+}
+
+/* Badge non-letti aggregato sul tab Chats */
+.bottom-nav-badge {
+  position: absolute;
+  top: 0.35rem; left: 50%; margin-left: 0.35rem;
+  min-width: 18px; height: 18px; padding: 0 5px; box-sizing: border-box;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--danger, #e5484d); color: #fff;
+  font-size: 0.68rem; font-weight: 700; line-height: 1;
+  border-radius: 9px;
 }
 .bottom-nav-tab:hover { color: var(--text-primary); }
 .bottom-nav-tab.active { color: var(--accent); }
@@ -363,10 +375,23 @@
 }
 
 .chat-input {
+  position: relative;
   display: flex; gap: 0.75rem; padding: 1rem; align-items: flex-end;
   background: var(--surface-glass); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
   border-top: 1px solid var(--border-subtle); flex-shrink: 0;
 }
+
+/* Contatore byte: compare avvicinandosi alla soglia, rosso oltre il tetto. */
+.char-counter {
+  position: absolute; top: -0.6rem; right: 1rem;
+  padding: 0.05rem 0.5rem; border-radius: 10px;
+  background: var(--surface-2); border: 1px solid var(--border-strong);
+  color: var(--text-muted); font-size: 0.7rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.char-counter.over { color: #fff; background: var(--danger, #e5484d); border-color: transparent; }
+
+.chat-input .btn-icon:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
 .chat-input textarea, .chat-input input {
   flex: 1; background: var(--surface-2); border: 1px solid var(--border-strong);
   border-radius: 24px; padding: 0.65rem 1.1rem; color: var(--text-primary); outline: none;

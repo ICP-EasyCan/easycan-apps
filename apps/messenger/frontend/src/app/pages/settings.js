@@ -61,7 +61,7 @@ export function renderSettings(container) {
             el('div', { class: 'settings-notice-title' }, '\u{1F4E6} Message storage'),
             el('div', { class: 'hint small' },
               'Pending messages are kept on the sender’s canister for up to 7 days, then deleted automatically. ' +
-              'Chat history is stored locally in your browser unless you pin a conversation (Pro plan), in which case it is archived in your canister.'),
+              'Chat history is stored locally in your browser. You can pin a conversation — free for everyone — to archive it in your own canister instead; the most recent 1000 messages per contact are kept.'),
           ),
         ],
       },

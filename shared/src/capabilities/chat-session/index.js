@@ -36,7 +36,7 @@ import { loadLocalHistory, saveLocalHistory, appendToLocalHistory,
   from '../messaging/history.js';
 import { MessagingError } from '../errors.js';
 import { checkPersistence, togglePersistence, syncFromArchive, archiveInBackground,
-         deleteArchivedMessage }
+         deleteArchivedMessage, ARCHIVE_MAX_PER_PEER }
   from '../archive/index.js';
 import { removePendingFromCache }
   from '../notify/index.js';
@@ -348,7 +348,7 @@ export async function startChatSession(options) {
         try {
           await deleteOwnMessage(ownCid, BigInt(rec.msgId));
         } catch (err) {
-          onSystem(`Impossibile eliminare: ${err.message}`);
+          onSystem(`Could not delete: ${err.message}`);
           return false;
         }
         pendingDeliveries.delete(localId);
@@ -383,7 +383,7 @@ export async function startChatSession(options) {
       try {
         await editOwnMessage(ownCid, BigInt(rec.msgId), newText);
       } catch (err) {
-        onSystem(`Impossibile modificare: ${err.message}`);
+        onSystem(`Could not edit: ${err.message}`);
         return false;
       }
 
@@ -408,15 +408,18 @@ export async function startChatSession(options) {
         onPersistence(_isPersistent);
 
         if (_isPersistent) {
-          onSystem('Salvataggio cronologia nel canister...');
           const history = loadLocalHistory(peerPid);
+          if (history.length > ARCHIVE_MAX_PER_PEER) {
+            onSystem(`Only the most recent ${ARCHIVE_MAX_PER_PEER} messages will be kept in your canister.`);
+          }
+          onSystem('Saving history to your canister…');
           if (history.length > 0) {
             await archiveInBackground(ownCid, peerPid, history);
           }
-          onSystem('Cronologia salvata nel canister.');
+          onSystem('History saved to your canister.');
         }
       } catch (e) {
-        onSystem(`Errore: ${e.message}`);
+        onSystem(`Error: ${e.message}`);
       }
     },
 

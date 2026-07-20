@@ -25,6 +25,7 @@
 import {
   clearChunkStore, uploadChunk, stopCanister, startCanister,
   takeSnapshot as takeCanisterSnapshot, loadSnapshot, installChunkedCode, hexToBytes, sliceChunks,
+  readCyclesStatus,
 } from '../../core/management.js';
 import { call, query } from '../../core/icp.js';
 
@@ -47,6 +48,48 @@ const CONTENT_TYPES = {
 };
 
 const ASSET_BATCH_BYTES = 1_500_000; // soglia per batch upload_asset_batch (< limite ingress)
+
+// ─── Pre-flight snapshot: c'è margine di cicli per prenderlo? ────────────────────
+// Lo snapshot copia l'INTERO stato del canister (heap + stable + chunk store col
+// wasm appena caricato). Alla creazione l'IC riserva lo storage per la finestra di
+// freezing su quel footprint gonfiato (+ eventuali reserved_cycles sotto pressione
+// di memoria della subnet) → il requisito TRANSITORIO è molto sopra il costo nominale
+// dell'upgrade. Misurato dal vivo (EasyChat A, mainnet 2026-07-20): un upgrade con
+// snapshot ha richiesto ~8-11× la freezing reserve a regime (fallito con ~345B di
+// balance su ~40B di reserve, riuscito con ~438B). Senza questo check l'IC rifiuta lo
+// snapshot SOLO dopo che i chunk sono già stati caricati → ~6,6B di cicli sprecati per
+// niente + retry che ri-carica. Falliamo QUI, prima dell'upload, con un messaggio chiaro.
+const SNAPSHOT_HEADROOM_FACTOR = 8n;                  // × freezing reserve (conservativo, empirico)
+const UPGRADE_EXECUTION_BUFFER = 30_000_000_000n;     // ~30B: stop/install/start/asset upload (una-tantum)
+
+/**
+ * Stima se il canister ha abbastanza cicli per prendere in sicurezza lo snapshot
+ * pre-upgrade; lancia con un messaggio azionabile se no. Best-effort: se lo status
+ * non è leggibile (es. replica locale senza `idle_cycles_burned_per_day`), NON blocca
+ * l'upgrade — prosegue.
+ * @param {string} canisterId
+ */
+async function assertSnapshotAffordable(canisterId) {
+  let st;
+  try {
+    st = await readCyclesStatus(canisterId);
+  } catch (e) {
+    console.warn('[update] snapshot pre-flight skipped (status read failed):', e?.message || e);
+    return;
+  }
+  const freezingReserve = st.freezingThresholdSeconds > 0n
+    ? (st.idleBurnPerDay * st.freezingThresholdSeconds) / 86_400n
+    : 0n;
+  const recommended = freezingReserve * SNAPSHOT_HEADROOM_FACTOR + UPGRADE_EXECUTION_BUFFER;
+  if (st.cycles >= recommended) return;
+  const toB = (c) => (Number(c) / 1e9).toFixed(1);
+  throw new Error(
+    `Not enough cycles for a safe pre-upgrade snapshot. The snapshot copies the whole ` +
+    `canister state, so creating it briefly needs several times more cycles than the update ` +
+    `itself — about ${toB(recommended)}B, but the canister holds only ${toB(st.cycles)}B. ` +
+    `Top up the canister with cycles and try again. (App publishers can skip the snapshot by ` +
+    `setting takeSnapshot: false, which updates without a rollback safety net.)`);
+}
 
 /**
  * Esegue il flusso completo di install-da-chunk. Non lancia: ritorna un esito
@@ -100,7 +143,16 @@ export async function runUpgrade({
           `(on-chain ${want || 'n/a'}, manifest ${got || 'n/a'}).`);
       }
     }
+    // ── Passo 0: pre-flight cicli (solo se prendiamo lo snapshot) ────────────────
+    // Prima di scaricare/uploadare: se lo snapshot non è affrontabile, meglio fermarsi
+    // ORA che dopo aver bruciato cicli nell'upload dei chunk (cfr. nota su assertSnapshotAffordable).
+    if (takeSnapshot) {
+      phase = 'preflight';
+      onProgress('preflight', 'Checking there are enough cycles for a safe snapshot…');
+      await assertSnapshotAffordable(canisterId);
+    }
     // ── Passo 1: WASM verificato ───────────────────────────────────────────────
+    phase = 'fetch-wasm';
     onProgress('fetch-wasm', 'Downloading the new version…');
     const wasm = await fetchVerified(manifest.wasm_url, manifest.wasm_sha256, 'WASM');
 

@@ -95,6 +95,18 @@ fn init_all_storage() {
         max_record_bytes: 65_536,
         max_records_per_namespace: 10_000,
     });
+    // Limite messaggio a 2 KB (finding C). Outbox e archivio DEVONO salire insieme:
+    // il testo archiviato è lo stesso testo del messaggio. Ring buffer a 1000/peer
+    // invariato (finding B: evict del più vecchio, la logica vive in cap-archive).
+    cap_messaging::configure(cap_messaging::MessagingConfig {
+        max_payload_bytes: 2048,
+        max_pending_per_recipient: 50,
+    });
+    cap_archive::configure(cap_archive::ArchiveConfig {
+        max_messages_per_peer: 1000,
+        max_payload_bytes: 2048,
+        max_batch_size: 100,
+    });
 }
 
 fn register_cleanups() {

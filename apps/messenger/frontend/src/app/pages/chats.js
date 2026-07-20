@@ -51,6 +51,8 @@ export function renderChats(container, opts = {}) {
         el('div', { class: 'empty-icon' }, '\u{1F4AC}'),
         el('h3', {}, 'No active chats'),
         el('p', { class: 'hint' }, 'Tap the + button to add a contact.'),
+        el('p', { class: 'hint' },
+          'Contacts are mutual: to chat with someone, share your code so they can add you — and add theirs too. It only works once both sides have added each other.'),
       )
     : el('div', { class: 'chat-list' },
         ...sorted.map(c => _renderChatItem(c, pendingSenders.has(c.principalId), selectedKey)),

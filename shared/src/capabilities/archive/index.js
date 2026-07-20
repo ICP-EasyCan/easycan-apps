@@ -26,6 +26,15 @@ import { call, query } from '../../core/icp.js';
 const MAX_BATCH = 100;
 
 /**
+ * Numero massimo di messaggi conservati per contatto nell'archivio del canister.
+ * Mirror del cap backend cap-archive (fonte di verità:
+ * core/cap-archive/src/lib.rs → ArchiveConfig.max_messages_per_peer, default 1000).
+ * Oltre questa soglia il ring-buffer backend evince i più vecchi: qui serve solo
+ * ad avvisare l'utente al pin che la coda locale eccede quanto verrà conservato.
+ */
+export const ARCHIVE_MAX_PER_PEER = 1000;
+
+/**
  * Verifica se una chat è persistente.
  * @param {string} ownCid — proprio canister
  * @param {string} peerId — principal del peer

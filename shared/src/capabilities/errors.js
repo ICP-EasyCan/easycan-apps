@@ -5,6 +5,7 @@
  *
  * MessagingError.code:
  *   - 'not_in_whitelist'      → recipient has not added the sender
+ *   - 'too_many_pending'      → recipient's outbox for the sender is full (undelivered backlog)
  *   - 'canister_unreachable'  → network / certificate / canister rejected the call
  *   - 'unknown'               → unmapped failure (see `message`)
  *
@@ -38,6 +39,7 @@ export class CallError extends Error {
 export function classifyIcpError(err) {
   const msg = String(err?.message || err || '');
   if (/whitelist|Unauthorized/i.test(msg)) return 'not_in_whitelist';
+  if (/too many pending/i.test(msg)) return 'too_many_pending';
   if (/agent|network|fetch|certificate|reject|destination|canister/i.test(msg)) return 'canister_unreachable';
   return 'unknown';
 }

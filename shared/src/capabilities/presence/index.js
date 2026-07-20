@@ -8,6 +8,7 @@
  *   initPresence(ownCid)               → segnala online, registra beforeunload
  *   stopPresence()                     → segnala offline, cleanup
  *   checkPeerPresence(peerCid)         → { online, lastSeenMs }
+ *   watchPeerPresence(peerCid, cb, opts) → auto-refresh presenza, ritorna stop()
  *
  * Bus: ascolta auth:logout per auto-stop.
  * Backend: set_presence (update), get_presence (query).
@@ -66,6 +67,42 @@ export async function checkPeerPresence(peerCid) {
   } catch {
     return { online: false, lastSeenMs: null };
   }
+}
+
+/**
+ * Osserva la presenza di un peer con refresh automatico.
+ *
+ * Fa un primo check immediato, poi ri-controlla ogni `intervalMs`. Ripolla
+ * anche al ritorno visibile della pagina (i timer sono throttlati/congelati a
+ * pagina nascosta sui browser mobile) così l'indicatore è fresco appena si
+ * torna in chat. Il callback riceve l'esito di `checkPeerPresence`.
+ *
+ * @param {string} peerCid — canister ID del peer
+ * @param {(presence: { online: boolean, lastSeenMs: number|null }) => void} cb
+ * @param {{ intervalMs?: number }} [opts] — intervallo refresh (default 30000)
+ * @returns {() => void} stop() — ferma il refresh e rimuove i listener
+ */
+export function watchPeerPresence(peerCid, cb, { intervalMs = 30_000 } = {}) {
+  let stopped = false;
+
+  async function tick() {
+    const presence = await checkPeerPresence(peerCid);
+    if (!stopped) cb(presence);
+  }
+
+  const visListener = () => {
+    if (document.visibilityState === 'visible') tick();
+  };
+
+  tick();
+  const timer = setInterval(tick, intervalMs);
+  document.addEventListener('visibilitychange', visListener);
+
+  return function stop() {
+    stopped = true;
+    clearInterval(timer);
+    document.removeEventListener('visibilitychange', visListener);
+  };
 }
 
 // Auto-stop su logout

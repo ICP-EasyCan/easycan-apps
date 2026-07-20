@@ -14,14 +14,13 @@ import { CallError }        from '@shared/capabilities/errors.js';
 import { el, render, formatLastSeen }
                             from '@shared/ui/dom.js';
 import { navigate }         from '@shared/ui/router.js';
-import { checkTier }        from '@shared/core/platform.js';
 import { avatarEl }         from '../components/avatar.js';
 
 // Orchestrazione
 import { startChatSession } from '@shared/capabilities/chat-session/index.js';
 
 // Capability dirette (non parte della sessione chat)
-import { checkPeerPresence, initiateCall, getActiveCall }
+import { watchPeerPresence, initiateCall, getActiveCall }
                             from '../connection-manager.js';
 import { getContactAlias }  from '../contacts-store.js';
 import { playMessage }      from '@shared/capabilities/sounds/index.js';
@@ -43,10 +42,12 @@ export function renderChat(container, param) {
   // visibile scrivendoli in un DOM staccato.
   const chatKey = `#chat/${peerCid}:${peerPid}`;
   let leftChat = false;
+  let presenceStop = null;
   const unsubRoute = bus.on('route:change', ({ hash }) => {
     if (hash === chatKey) return;
     leftChat = true;
     unsubRoute();
+    if (presenceStop) presenceStop();
     if (session) session.stop();
   });
 
@@ -58,22 +59,48 @@ export function renderChat(container, param) {
   const callBtn = el('button', { class: 'btn-icon', title: 'Call', onclick: handleCall }, '\u{1F4DE}');
   const pinBtn = el('button', { class: 'btn-icon', title: 'Local chat only' }, '\u{1F4CE}');
 
-  // Query presenza all'apertura
-  checkPeerPresence(peerCid).then(({ online, lastSeenMs }) => {
+  // Presenza a chat aperta: primo check immediato + auto-refresh (30s) e ripoll
+  // su visibilitychange. Lo stop() è agganciato al teardown route:change sopra.
+  presenceStop = watchPeerPresence(peerCid, ({ online, lastSeenMs }) => {
     if (online) {
       presenceEl.textContent = 'online';
       presenceEl.style.color = 'var(--online)';
     } else if (lastSeenMs) {
       presenceEl.textContent = formatLastSeen(lastSeenMs);
       presenceEl.style.color = 'var(--text-dim)';
+    } else {
+      presenceEl.textContent = '';
     }
-  }).catch(() => {});
+  });
 
   // ─── Layout ──────────────────────────────────────────────────────────────
 
+  // Limite payload per messaggio (mirror del cap-messaging max_payload_bytes
+  // del messenger). Il contatore compare avvicinandosi alla soglia e blocca
+  // l'invio oltre il tetto — l'utente lo vede prima, non con un errore tecnico.
+  const MAX_BYTES  = 2048;
+  const WARN_BYTES = 1843; // ~90%: sotto questa quota il contatore resta nascosto
+
   const msgList = el('div', { class: 'msg-list' });
   const inputField = el('input', { type: 'text', placeholder: 'Type a message...' });
+  const counterEl = el('span', { class: 'char-counter', style: 'display:none;' }, '');
   const sendBtn = el('button', { class: 'btn-icon', title: 'Send', onclick: handleSend }, '➤');
+
+  function byteLen(str) { return new TextEncoder().encode(str).length; }
+
+  function updateCounter() {
+    const bytes = byteLen(inputField.value);
+    const over  = bytes > MAX_BYTES;
+    if (bytes >= WARN_BYTES) {
+      counterEl.style.display = '';
+      counterEl.textContent = `${bytes} / ${MAX_BYTES}`;
+      counterEl.classList.toggle('over', over);
+    } else {
+      counterEl.style.display = 'none';
+      counterEl.classList.remove('over');
+    }
+    sendBtn.disabled = over;
+  }
   const editBanner = el('div', { class: 'chat-edit-banner', style: 'display:none;' },
     el('span', {}, 'Editing message'),
     el('button', { class: 'btn-icon', title: 'Cancel edit', onclick: cancelEdit }, '✕'),
@@ -100,12 +127,16 @@ export function renderChat(container, param) {
       editBanner,
       el('div', { class: 'chat-input' },
         inputField,
+        counterEl,
         sendBtn,
       ),
     ),
   );
 
   inputField.focus();
+
+  // Contatore byte live
+  inputField.addEventListener('input', updateCounter);
 
   // Enter per inviare
   inputField.addEventListener('keydown', (e) => {
@@ -129,14 +160,9 @@ export function renderChat(container, param) {
     session = s;
     // Navigato via prima che la sessione finisse di partire: spegnila subito.
     if (leftChat) { s.stop(); return; }
-    pinBtn.onclick = async () => {
-      if (!session) return;
-      const allowed = await checkTier(CANISTER_ID, 1);
-      if (!allowed) {
-        addSystemMessage('Persistent archive is available in the Pro plan.');
-        return;
-      }
-      session.togglePersist();
+    // Il pin è gratis per tutti: salva la cronologia nel proprio canister.
+    pinBtn.onclick = () => {
+      if (session) session.togglePersist();
     };
   });
 
@@ -184,16 +210,20 @@ export function renderChat(container, param) {
   async function handleSend() {
     const text = inputField.value.trim();
     if (!text || !session) return;
+    // Oltre il tetto non si invia: il contatore è già rosso e sendBtn disabled,
+    // ma l'invio via Enter bypassa il disabled → guardia esplicita qui.
+    if (byteLen(text) > MAX_BYTES) return;
 
     if (editingLocalId) {
       const localId = editingLocalId;
       cancelEdit();
       const ok = await session.editMessage(localId, text);
-      if (!ok) inputField.value = text; // fallito (es. consegnato nel frattempo) — non perdere il testo
+      if (!ok) { inputField.value = text; updateCounter(); } // fallito (es. consegnato nel frattempo) — non perdere il testo
       return;
     }
 
     inputField.value = '';
+    updateCounter();
     await session.send(text);
   }
 
@@ -203,6 +233,7 @@ export function renderChat(container, param) {
     editingLocalId = localId;
     inputField.value = text;
     inputField.focus();
+    updateCounter();
     editBanner.style.display = 'flex';
     sendBtn.title = 'Save edit';
   }
@@ -210,6 +241,7 @@ export function renderChat(container, param) {
   function cancelEdit() {
     editingLocalId = null;
     inputField.value = '';
+    updateCounter();
     editBanner.style.display = 'none';
     sendBtn.title = 'Send';
   }
@@ -342,6 +374,8 @@ export function renderChat(container, param) {
     switch (code) {
       case 'not_in_whitelist':
         return `Not delivered — ${alias} has not added you to their contacts.`;
+      case 'too_many_pending':
+        return `Not delivered — ${alias} has too many undelivered messages waiting. They need to open the app to receive them first.`;
       case 'canister_unreachable':
         return `Not delivered — recipient canister unreachable.`;
       default:

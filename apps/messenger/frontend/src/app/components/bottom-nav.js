@@ -11,6 +11,10 @@
  */
 
 import { navigate } from '@shared/ui/router.js';
+import { bus }      from '@shared/core/event-bus.js';
+import { getPendingCache } from '../connection-manager.js';
+
+let _pendingUnsub = null;
 
 const TABS = [
   { route: '#chats',    icon: '\u{1F4AC}', label: 'Chats' },
@@ -46,6 +50,20 @@ function _update() {
   }
 }
 
+// Badge non-letti aggregato sul tab Chats: numero di sender con messaggi
+// pending (senders.size dello snapshot notify). 0 → nascosto. Visibile da
+// ogni tab, così i non-letti si notano anche fuori dalla lista chat.
+function _updateBadge(count) {
+  const badge = document.querySelector('#bottom-nav .bottom-nav-badge');
+  if (!badge) return;
+  if (count > 0) {
+    badge.textContent = count > 99 ? '99+' : String(count);
+    badge.style.display = '';
+  } else {
+    badge.style.display = 'none';
+  }
+}
+
 export function initBottomNav() {
   if (document.getElementById('bottom-nav')) return;
 
@@ -70,15 +88,31 @@ export function initBottomNav() {
 
     btn.appendChild(icon);
     btn.appendChild(label);
+
+    if (tab.route === '#chats') {
+      const badge = document.createElement('span');
+      badge.className = 'bottom-nav-badge';
+      badge.style.display = 'none';
+      btn.appendChild(badge);
+    }
+
     nav.appendChild(btn);
   }
 
   document.getElementById('app').appendChild(nav);
   _update();
   window.addEventListener('hashchange', _update);
+
+  // Badge non-letti: seed immediato dallo snapshot corrente, poi aggiornato
+  // ad ogni poll notify.
+  _updateBadge(getPendingCache().size);
+  _pendingUnsub = bus.on('notify:pending-update', ({ senders }) => {
+    _updateBadge(senders ? senders.size : 0);
+  });
 }
 
 export function removeBottomNav() {
   window.removeEventListener('hashchange', _update);
+  if (_pendingUnsub) { _pendingUnsub(); _pendingUnsub = null; }
   document.getElementById('bottom-nav')?.remove();
 }
