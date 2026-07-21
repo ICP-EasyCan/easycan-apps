@@ -1,0 +1,13 @@
+{
+  "app": "messenger",
+  "version": "0.3.6",
+  "min_compatible_version": "0.1.0",
+  "wasm_url": "https://raw.githubusercontent.com/ICP-EasyCan/easycan-apps/dist/messenger/0.3.6/messenger_canister.wasm",
+  "wasm_sha256": "47f11a74dd0729f9369e3daab1f135ac5c02b159dc0378c9001ea375c467c7b1",
+  "frontend_url": "https://raw.githubusercontent.com/ICP-EasyCan/easycan-apps/dist/messenger/0.3.6/frontend.tar.gz",
+  "frontend_sha256": "4cdb72c2b996d45b221a23cd35fe2210a347ab77c877fdfd699669e406b2d6ff",
+  "released_at": "2026-07-21T02:19:20Z",
+  "source_commit": "6e7de4b93396a1b81dde77075320867d8bfc0763",
+  "release_tag": "messenger-v0.3.6",
+  "notes": "Release messenger-v0.3.6. Verify: docs/build/REPRODUCIBLE_BUILD.md"
+}
