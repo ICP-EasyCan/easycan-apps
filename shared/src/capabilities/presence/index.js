@@ -5,7 +5,7 @@
  * Heartbeat implicito tramite piggyback in icp.js (throttle 60s).
  *
  * Exports:
- *   initPresence(ownCid)               → segnala online, registra beforeunload
+ *   initPresence(ownCid)               → segnala online
  *   stopPresence()                     → segnala offline, cleanup
  *   checkPeerPresence(peerCid)         → { online, lastSeenMs }
  *   watchPeerPresence(peerCid, cb, opts) → auto-refresh presenza, ritorna stop()
@@ -19,33 +19,48 @@ import { bus } from '../../core/event-bus.js';
 
 const STALE_MS = 90_000;
 
+// Throttle del ping "online" che SOPRAVVIVE ai reload: un F5 ripetuto non deve
+// ripagare ~6.2M cycles ogni volta. Deve stare sotto la soglia di staleness del
+// backend (90s) così la presenza resta fresca anche saltando il ping. Timbro in
+// localStorage (per-origin: un solo canister proprio per origin).
+const ONLINE_THROTTLE_MS = 60_000;
+const LAST_ONLINE_KEY = 'cap_presence_last_online';
+
 let _ownCid = null;
 
 /**
- * Segnala online al login. Registra beforeunload per segnalare offline.
- * Chiamare una sola volta dopo il login.
+ * Segnala online al login. Chiamare una sola volta dopo il login.
+ *
+ * NON registra più un ping offline su beforeunload: era ~6.2M cycles ad ogni
+ * refresh/chiusura ED è inaffidabile (i browser uccidono la chiamata firmata
+ * durante il teardown della pagina). Il peer viene messo offline dal timer di
+ * staleness (soglia 90s di silenzio) — vedi cleanup_stale in cap-presence.
  */
 export function initPresence(ownCid) {
   _ownCid = ownCid;
   setOwnCanisterId(ownCid);
-  call(ownCid, 'set_presence', true).catch(console.warn);
-  window.addEventListener('beforeunload', _handleBeforeUnload);
+  // Se abbiamo già segnalato online da meno di 60s (< soglia staleness 90s del
+  // backend), NON rifare l'update: la presenza è ancora fresca. Al primo avvio (o
+  // trascorsi 60s) segnala e timbra. Così F5 ripetuti non ripagano il ping ogni volta.
+  let last = 0;
+  try { last = Number(localStorage.getItem(LAST_ONLINE_KEY)) || 0; } catch { /* n/d */ }
+  if (Date.now() - last >= ONLINE_THROTTLE_MS) {
+    call(ownCid, 'set_presence', true).catch(console.warn);
+    try { localStorage.setItem(LAST_ONLINE_KEY, String(Date.now())); } catch { /* n/d */ }
+  }
 }
 
 /** Segnala offline e pulisce (logout). */
 export function stopPresence() {
-  window.removeEventListener('beforeunload', _handleBeforeUnload);
   if (_ownCid) {
     call(_ownCid, 'set_presence', false).catch(() => {});
     _ownCid = null;
   }
+  // Azzera il timbro: dopo un logout (che ci ha messi offline) il prossimo login
+  // DEVE ri-segnalare online, altrimenti il throttle lo salterebbe e resteremmo
+  // offline agli occhi dei peer.
+  try { localStorage.removeItem(LAST_ONLINE_KEY); } catch { /* n/d */ }
   setOwnCanisterId(null);
-}
-
-function _handleBeforeUnload() {
-  if (_ownCid) {
-    call(_ownCid, 'set_presence', false).catch(() => {});
-  }
 }
 
 /**

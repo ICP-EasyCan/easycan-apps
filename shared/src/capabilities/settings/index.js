@@ -63,21 +63,26 @@ export function renderSettings(container, options = {}) {
 
   // ── Canister (cicli + memoria): valori riempiti async dopo il render ──
   // È il carburante e l'impronta del canister sovrano: "il tuo computer, la sua benzina".
-  let cyclesVal, memVal, burnVal, autonomyVal;
+  let cyclesVal, memVal, burnVal, autonomyVal, refreshBtn;
   if (showCanisterHealth) {
     cyclesVal    = el('span', { class: 'settings-value mono small' }, '…');
     memVal       = el('span', { class: 'settings-value mono small' }, '…');
     burnVal      = el('span', { class: 'settings-value mono small' }, '…');
     autonomyVal  = el('span', { class: 'settings-value mono small' }, '…');
+    // Memory/Idle burn/Autonomy vengono da platform_status (un UPDATE ~6.7M cycles):
+    // cachati per non pagarli a ogni apertura di Settings. Questo ↻ forza il refetch
+    // quando serve un dato aggiornato (es. dopo un top-up di cicli).
+    refreshBtn   = el('button', { class: 'copy-btn', type: 'button', title: 'Refresh memory & burn (costs cycles)' }, '↻');
     sections.push(
       el('div', { class: 'settings-section' },
         el('h3', {}, 'Canister'),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Cycles'), cyclesVal),
-        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Memory'), memVal),
+        el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Memory'), memVal, refreshBtn),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Idle burn'), burnVal),
         el('div', { class: 'settings-row' }, el('span', { class: 'settings-label' }, 'Autonomy (idle)'), autonomyVal),
         el('p', { class: 'settings-hint small' },
-          'Idle estimate: excludes active use (calls, messages). It’s the theoretical maximum, not real consumption.'),
+          'Idle estimate: excludes active use (calls, messages). It’s the theoretical maximum, not real consumption. ' +
+          'Memory & burn are cached to save cycles — use ↻ to refresh them.'),
       ),
     );
   }
@@ -111,16 +116,26 @@ export function renderSettings(container, options = {}) {
   );
 
   if (showCanisterHealth) {
-    loadCanisterHealth(canisterId)
-      .then(({ cycles, memoryBytes, idleBurnPerDay }) => {
-        cyclesVal.textContent   = formatCycles(cycles);
-        memVal.textContent      = formatBytes(memoryBytes);
-        burnVal.textContent     = formatBurnPerDay(idleBurnPerDay);
-        autonomyVal.textContent = formatAutonomyDays(cycles, idleBurnPerDay);
-      })
-      .catch(() => {
-        cyclesVal.textContent = 'n/a'; memVal.textContent = 'n/a';
-        burnVal.textContent = 'n/a'; autonomyVal.textContent = 'n/a';
-      });
+    const fillHealth = (refreshStatus = false) =>
+      loadCanisterHealth(canisterId, { refreshStatus })
+        .then(({ cycles, memoryBytes, idleBurnPerDay }) => {
+          cyclesVal.textContent   = formatCycles(cycles);
+          memVal.textContent      = formatBytes(memoryBytes);
+          burnVal.textContent     = formatBurnPerDay(idleBurnPerDay);
+          autonomyVal.textContent = formatAutonomyDays(cycles, idleBurnPerDay);
+        })
+        .catch(() => {
+          cyclesVal.textContent = 'n/a'; memVal.textContent = 'n/a';
+          burnVal.textContent = 'n/a'; autonomyVal.textContent = 'n/a';
+        });
+
+    refreshBtn.addEventListener('click', async () => {
+      refreshBtn.disabled = true;
+      memVal.textContent = '…'; burnVal.textContent = '…'; autonomyVal.textContent = '…';
+      await fillHealth(true);
+      refreshBtn.disabled = false;
+    });
+
+    fillHealth(false);
   }
 }

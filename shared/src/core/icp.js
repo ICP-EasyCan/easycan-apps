@@ -87,7 +87,16 @@ function _touchPresence() {
 export async function call(cid, method, ...args) {
   const actor = await getActorFor(cid);
   const result = await actor[method](...args);
-  _touchPresence();
+  // Se la chiamata È GIÀ un set_presence sul proprio canister, la presenza è
+  // appena stata rinfrescata dal filo: registra il timestamp e NON piggybackare.
+  // Altrimenti a ogni boot initPresence sparerebbe DUE set_presence(true)
+  // identici (~6M cycles sprecati/refresh) e stopPresence rischierebbe un
+  // re-online subito dopo il logout. Il piggyback serve solo agli ALTRI update.
+  if (method === 'set_presence' && cid === _ownCid) {
+    _lastPresenceTouch = Date.now();
+  } else {
+    _touchPresence();
+  }
   return result;
 }
 
